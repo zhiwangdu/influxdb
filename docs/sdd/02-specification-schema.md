@@ -1,8 +1,20 @@
-# 02. 规格 Schema（面向 AI 自动编码）
+# 02. 规格 Schema（AI 自动编码输入契约）
 
-本文定义统一的 SDD 规格结构，供人类与 AI 共用。建议每个需求对应一个规格文件：`specs/<yyyy>/<spec-id>.yaml`。
+本文件定义 SDD 规格的**语义字段**，并配套机器校验文件：
 
-## 1. 规格字段定义
+- `docs/sdd/schema/spec.schema.json`
+
+建议每个需求对应：`specs/<yyyy>/<spec-id>.yaml`。
+
+## 1. 字段设计原则
+
+- `scope`：约束 AI 可修改范围（防止越界修改）
+- `contracts`：显式声明 API/配置/数据契约
+- `nfr`：将性能、可靠性、安全、可观测要求结构化
+- `validation`：把测试计划写入规格本体
+- `release_and_rollback`：强制发布与回退策略
+
+## 2. 规格 YAML 示例骨架
 
 ```yaml
 id: "SPEC-YYYY-NNN"
@@ -13,38 +25,28 @@ reviewers: ["role-a", "role-b"]
 
 context:
   background: "背景问题"
-  goals:
-    - "目标1"
-    - "目标2"
-  non_goals:
-    - "非目标1"
+  goals: ["目标1", "目标2"]
+  non_goals: ["非目标1"]
 
 scope:
-  in_scope:
-    - "模块/包/接口"
-  out_of_scope:
-    - "明确排除项"
+  in_scope: ["services/httpd", "coordinator"]
+  out_of_scope: ["tsdb format changes"]
 
 codebase_mapping:
-  entrypoints:
-    - "cmd/influxd"
-  packages:
-    - "services/httpd"
-    - "coordinator"
-    - "tsdb"
-  configs:
-    - "配置键路径"
+  entrypoints: ["cmd/influxd"]
+  packages: ["services/httpd", "coordinator", "query"]
+  configs: ["[http].*"]
 
 contracts:
   api:
-    - name: "HTTP API or CLI"
+    - name: "POST /write"
       change_type: additive|breaking|internal
-      request_contract: "参数/限制"
-      response_contract: "状态码/字段/错误语义"
+      request_contract: "参数与限制"
+      response_contract: "状态码与错误语义"
   data:
-    - name: "存储或索引契约"
+    - name: "存储/索引契约"
       compatibility: backward|forward|none
-      migration: "迁移方式"
+      migration: "迁移策略"
   config:
     - key: "[section].field"
       default: "默认值"
@@ -53,81 +55,68 @@ contracts:
 
 nfr:
   performance:
-    baseline: "基线说明"
-    target: "目标阈值"
+    baseline: "基线"
+    target: "目标"
   reliability:
-    slo: "可用性/错误率目标"
+    slo: "SLO"
   security:
-    authn_authz: "认证授权影响"
-    data_safety: "数据安全影响"
+    authn_authz: "影响"
+    data_safety: "影响"
   observability:
-    metrics:
-      - "新增指标"
-    logs:
-      - "新增日志"
-    traces:
-      - "链路追踪要点"
+    metrics: ["metric_a"]
+    logs: ["log_a"]
+    traces: ["trace_a"]
 
 design:
-  approach: "核心方案"
+  approach: "方案"
   alternatives:
-    - option: "备选方案"
+    - option: "备选"
       pros: ["..."]
       cons: ["..."]
   risks:
-    - risk: "风险描述"
-      mitigation: "缓解措施"
+    - risk: "风险"
+      mitigation: "缓解"
 
 implementation_plan:
   milestones:
     - name: "M1"
-      tasks:
-        - "task-1"
-        - "task-2"
+      tasks: ["task-1", "task-2"]
   feature_flags:
     - name: "flag_name"
       default: false
 
 validation:
-  unit_tests:
-    - "包级单测"
-  integration_tests:
-    - "跨模块验证"
-  performance_tests:
-    - "压测或 benchmark"
-  regression_tests:
-    - "历史缺陷回归"
-  manual_checks:
-    - "必要人工验证"
+  unit_tests: ["..."]
+  integration_tests: ["..."]
+  performance_tests: ["..."]
+  regression_tests: ["..."]
+  manual_checks: ["..."]
 
 release_and_rollback:
-  rollout: "灰度/分批策略"
+  rollout: "灰度策略"
   rollback: "回滚步骤"
-  data_recovery: "数据恢复策略"
+  data_recovery: "数据恢复"
 
 traceability:
   related_issues: ["#123"]
   related_prs: ["#456"]
-  affected_docs:
-    - "README/配置文档/运维手册"
+  affected_docs: ["README", "配置文档"]
 ```
 
-## 2. AI 执行约束（建议）
+## 3. AI 约束（建议）
 
-- AI 必须先解析 `scope` 与 `codebase_mapping`，不得越界改动。
-- AI 必须根据 `contracts` 生成验证用例骨架。
-- AI 必须在提交说明中引用 `id` 与 `milestone`。
-- `change_type=breaking` 时，AI 需阻断自动合并并要求人工评审。
+- AI 必须先读取 `scope.in_scope` 再进行改动。
+- AI 必须为每条 `contracts.api` 生成至少 1 条契约测试。
+- 若存在 `change_type=breaking`，需触发人工评审并阻断自动合并。
+- AI 产出必须引用 `id + milestone`。
 
-## 3. 最小可执行规格（MVP）
+## 4. 最小可执行规格（MVP）
 
-若需求紧急，可最少填写：
+最低必填：
 
 - `id/title/context.goals`
-- `scope.in_scope/out_of_scope`
-- `contracts`（至少一个）
+- `scope`
+- `contracts`（至少一类）
 - `implementation_plan.milestones`
 - `validation.unit_tests + integration_tests`
 - `release_and_rollback`
-
-缺失上述字段时，不建议允许 AI 自动提交。

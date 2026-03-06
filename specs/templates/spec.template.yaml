@@ -1,0 +1,56 @@
+id: "SPEC-2026-001"
+title: "一句话描述变更目标"
+status: draft
+owner: "team-name"
+reviewers: ["reviewer-a", "reviewer-b"]
+
+context:
+  background: "问题背景"
+  goals:
+    - "目标 1"
+  non_goals:
+    - "非目标 1"
+
+scope:
+  in_scope:
+    - "services/httpd"
+  out_of_scope:
+    - "tsdb format"
+
+codebase_mapping:
+  entrypoints:
+    - "cmd/influxd"
+  packages:
+    - "services/httpd"
+  configs:
+    - "[http].*"
+
+contracts:
+  api:
+    - name: "POST /write"
+      change_type: additive
+      request_contract: "请求参数"
+      response_contract: "响应语义"
+
+nfr:
+  performance:
+    baseline: "现状"
+    target: "目标"
+  reliability:
+    slo: "SLO"
+
+implementation_plan:
+  milestones:
+    - name: "M1"
+      tasks:
+        - "task-1"
+
+validation:
+  unit_tests:
+    - "单测项"
+  integration_tests:
+    - "集成项"
+
+release_and_rollback:
+  rollout: "灰度方案"
+  rollback: "回滚步骤"

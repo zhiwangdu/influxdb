@@ -1,53 +1,48 @@
-# InfluxDB 1.x Specification-Driven Development (SDD) 文档集
+# InfluxDB 1.x Specification-Driven Development (SDD) 指南
 
-> 目标：基于 `master-1.x` 的代码组织与运行机制，建立一套可被 AI 与人类协作共用的“规格先行”研发范式，降低上下文丢失、回归风险与跨模块改动不确定性。
+本目录提供一套**可执行、可评审、可自动校验**的 SDD 文档，目标是让 `master-1.x` 上的人类开发者与 AI Agent 使用统一规格语言协作。
 
-## 1. 为什么在 InfluxDB 1.x 上采用 SDD
+## 1) 适用范围
 
-InfluxDB 1.x 代码规模大、子系统多（写入、查询、存储引擎、索引、订阅、协议接入、监控等），且强依赖跨模块契约。传统“先写代码后补说明”在以下场景成本高：
+- 分支：`master-1.x`
+- 目标对象：`cmd/*`、`services/*`、`coordinator/*`、`query/*`、`tsdb/*`、`storage/*` 等跨模块改动
+- 适用任务：新功能、行为修复、性能优化、兼容性调整
 
-- 写入链路与查询链路同时变更，容易破坏一致性。
-- `services/*` 的配置项扩展若缺乏契约，易引发兼容性问题。
-- `tsdb/*` 与 `coordinator/*` 的性能优化若缺少基线指标，回归不易发现。
-- 多命令入口（`influxd` / `influx` / `influx_inspect` / `influx_tools`）改动需要明确范围边界。
+## 2) 文档与资产
 
-SDD 的核心是：**先定义可执行规格，再驱动实现与验证**。
+- `01-system-analysis.md`：代码库分层分析与高风险区域。
+- `02-specification-schema.md`：规格字段定义（面向人类与 AI）。
+- `03-workflow-ai-coding.md`：从需求到交付的执行流程。
+- `04-quality-gates-and-playbooks.md`：质量门禁与场景化剧本。
+- `05-spec-example-write-path.yaml`：完整示例规格。
+- `schema/spec.schema.json`：机器可校验 JSON Schema。
+- `../../specs/templates/spec.template.yaml`：可复制的规格模板。
+- `../../tools/sdd/validate_spec.py`：本地规格校验脚本。
 
-## 2. 文档清单
+## 3) 最小落地规则（建议纳入团队规范）
 
-- `docs/sdd/01-system-analysis.md`
-  - 基于代码结构抽取的系统分层、模块职责、关键依赖与风险点。
-- `docs/sdd/02-specification-schema.md`
-  - 用于 AI 自动编码的统一规格 Schema（含 YAML 模板）。
-- `docs/sdd/03-workflow-ai-coding.md`
-  - 面向日常开发的端到端流程：需求 → 规格 → 任务切片 → 实现 → 验证 → 交付。
-- `docs/sdd/04-quality-gates-and-playbooks.md`
-  - 质量门禁、测试矩阵、常见改动场景（写入、查询、存储、协议服务）剧本。
+1. 任意跨包改动必须先提交规格（`specs/<yyyy>/<spec-id>.yaml`）。
+2. PR 标题或正文必须包含 `Spec ID`。
+3. 规格必须包含：范围、契约、验证、回滚。
+4. 合并前必须做“规格-实现一致性”检查。
 
-## 3. 采用原则（对齐业界实践）
+## 4) 快速开始
 
-- **Spec as Code**：规格与代码同仓、同评审、同版本。
-- **Contract First**：接口/配置/行为契约优先于实现细节。
-- **Traceability**：需求、规格、任务、提交、测试可追踪。
-- **Shift-left Validation**：在编码前通过规格校验和测试计划提前发现缺陷。
-- **Incremental Delivery**：通过小规格、小变更降低回归风险。
+```bash
+# 1) 基于模板创建规格
+cp specs/templates/spec.template.yaml specs/2026/SPEC-2026-010.yaml
 
-## 4. 最小落地方式
+# 2) 校验规格（结构 + 必填字段）
+python tools/sdd/validate_spec.py specs/2026/SPEC-2026-010.yaml
 
-1. 新需求必须先新增或更新规格文档。
-2. 代码变更 PR 必须引用规格 ID。
-3. 规格中必须包含：
-   - 影响模块；
-   - 兼容性声明；
-   - 验证策略（单测/集成/性能/回归）；
-   - 回滚策略。
-4. 合并前检查“规格与实现一致性”。
+# 3) 开发与测试
+# 按 03-workflow-ai-coding.md 与 04-quality-gates-and-playbooks.md 执行
+```
 
-## 5. AI 自动编码协作规则（建议）
+## 5) 与业界实践对齐
 
-- AI 只能在“已批准规格”范围内生成代码。
-- AI 生成变更必须附带：
-  - 规格对应关系；
-  - 测试覆盖说明；
-  - 非目标范围确认（Out of Scope）。
-- 若实现与规格冲突，以规格为准；若规格错误，先改规格再改代码。
+- Spec as Code（规格与代码同仓）
+- Contract First（契约先于实现）
+- Traceability（需求-规格-代码-测试可追踪）
+- Shift-left Validation（前置验证）
+- Progressive Delivery（渐进式发布 + 可回滚）

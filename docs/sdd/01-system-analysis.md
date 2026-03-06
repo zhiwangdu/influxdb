@@ -1,68 +1,66 @@
-# 01. 系统分析（master-1.x）
+# 01. `master-1.x` 系统分析（面向 SDD 建模）
 
-## 1. 代码分层总览
+## 1. 代码规模快照（基于仓库扫描）
 
-结合当前仓库结构，可将 InfluxDB 1.x 划分为以下层次：
+按顶层目录统计 Go 文件数量（用于评估规格影响面）：
 
-1. **入口与装配层**
-   - `cmd/influxd/*`：服务端主进程、配置装配、生命周期管理。
-   - `cmd/influx/*`：CLI 交互入口。
-   - `cmd/influx_inspect/*`、`cmd/influx_tools/*`：运维与离线工具链。
-2. **协议与服务层**
-   - `services/httpd`、`services/udp`、`services/graphite`、`services/collectd`、`services/opentsdb`。
-   - 负责多协议接入、鉴权、请求限制、响应序列化。
-3. **协调与查询层**
-   - `coordinator/*`：写入协调、语句执行依赖。
-   - `query/*`：查询执行器、任务管理、控制平面。
+- `tsdb`: 149
+- `pkg`: 114
+- `cmd`: 93
+- `services`: 84
+- `query`: 56
+- `storage`: 43
+- 其余目录合计：138
+- **总计：677 Go 文件**
+
+> 含义：InfluxDB 1.x 是典型“多子系统强耦合”项目，任何跨层改动都应以规格明确边界和验证策略。
+
+## 2. 分层模型（用于规格里的 `codebase_mapping`）
+
+1. **入口装配层**
+   - `cmd/influxd/*`: 服务启动、信号处理、配置装配。
+2. **协议服务层**
+   - `services/httpd` / `udp` / `graphite` / `collectd` / `opentsdb`。
+3. **协调执行层**
+   - `coordinator/*`（写入协调）
+   - `query/*`（查询执行与任务控制）
 4. **存储引擎层**
-   - `tsdb/*`：分片、索引、缓存、压缩文件（TSM）与 WAL。
-5. **元数据与运维层**
-   - `services/meta`、`monitor/*`、`prometheus/*`、`pkg/*` 通用能力。
-6. **Flux 与扩展层**
-   - `flux/*`、`storage/*`：Flux 相关桥接能力与存储接口。
+   - `tsdb/*`（shard/index/WAL/TSM）
+5. **生态与可观测层**
+   - `monitor/*`、`prometheus/*`、`flux/*`、`storage/*`
 
-## 2. 启动路径与关键依赖
+## 3. 启动链关键点（规格中应声明影响）
 
-`influxd` 启动时由命令入口装配 `run.Server`，并在 Server 中初始化：
+在 `influxd run` 场景中，Server 初始化顺序涉及：
 
-- TLS 与配置归一化；
-- 元数据客户端（`MetaClient`）；
-- `TSDBStore` 与引擎选项；
-- `PointsWriter`（写入协调）；
-- `QueryExecutor` 与 `StatementExecutor`（查询执行）；
-- `Monitor` 与统计信息。
+- TLS 配置默认化
+- MetaClient 初始化
+- TSDBStore 引擎配置
+- PointsWriter 与 QueryExecutor 绑定
+- Monitor/统计信息注册
 
-这意味着：**规格设计必须显式声明变更所在层，以及是否影响 Server 装配顺序和默认配置**。
+若需求影响上述任一阶段，规格需显式写明：
 
-## 3. 关键领域模型（用于规格建模）
+- 启动顺序是否变化
+- 失败回滚行为
+- 默认配置兼容性
 
-- **Data Plane**
-  - 写入：协议入口 → 解析 → PointsWriter → TSDB shard/WAL/TSM。
-  - 查询：HTTP/CLI → QueryExecutor → shard mapper → engine cursor。
-- **Control Plane**
-  - 配置加载、动态重载、任务并发控制、限流与超时。
-- **Meta Plane**
-  - DB/RP/shard group 元数据、节点信息、保留策略。
-- **Observability Plane**
-  - 监控指标、日志、诊断数据、Prometheus 暴露。
+## 4. 高风险改动区域（强制 L2/L3 规格）
 
-## 4. 高风险改动区（应强制规格化）
+- `services/httpd` 请求参数、错误码、鉴权语义变化
+- `coordinator` 与 `tsdb` 接口/结构变更
+- 索引或存储格式行为（TSI/TSM/WAL）变更
+- `cmd/influx_inspect` / `cmd/influx_tools` 输出契约变化
 
-1. `coordinator/*` 与 `tsdb/*` 的接口变更。
-2. `services/httpd` 请求参数、认证、错误码语义调整。
-3. 索引引擎（inmem/tsi）切换策略或默认值调整。
-4. 影响 `run.Server` 初始化顺序的改动。
-5. `cmd/influx_inspect` / `influx_tools` 输出格式变更（运维兼容性风险）。
+## 5. 规格分级建议
 
-## 5. 规格拆分建议（按变更粒度）
+- **L1（包内）**：单包行为改动，无外部契约变化。
+- **L2（跨包）**：2~4 个模块联动，必须有契约测试与回归清单。
+- **L3（平台级）**：影响启动路径、配置模型或数据兼容，需 ADR + 迁移/回滚计划。
 
-- **L1 小变更规格**：单包内部行为、无外部契约变化。
-- **L2 跨包规格**：2~4 个模块联动，需契约与回归清单。
-- **L3 平台级规格**：启动流程/配置模型/存储格式等，需 ADR + 迁移计划。
+## 6. 与业界实践映射
 
-## 6. 与业界实践对齐点
-
-- 对齐“Architecture Decision Record (ADR)”：平台级改动必须记录决策与备选方案。
-- 对齐“Contract Testing”：服务层参数与响应语义变化必须有契约测试。
-- 对齐“Performance Budget”：TSDB/Query 变更必须声明性能预算与测量方法。
-- 对齐“Progressive Delivery”：默认通过特性开关灰度启用高风险特性。
+- ADR（Architecture Decision Record）：L3 必选。
+- Contract Testing：服务层改动必选。
+- Performance Budget：`query/tsdb` 改动必选。
+- Progressive Delivery：高风险特性默认受 feature flag 控制。
