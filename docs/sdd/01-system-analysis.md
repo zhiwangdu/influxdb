@@ -64,3 +64,12 @@
 - Contract Testing：服务层改动必选。
 - Performance Budget：`query/tsdb` 改动必选。
 - Progressive Delivery：高风险特性默认受 feature flag 控制。
+
+
+## 7. 进一步的架构细节
+
+本文件提供分层与风险视图；若需要按“启动、写入、查询、对象接口、并发状态机”展开，请结合：
+
+- `docs/sdd/06-architecture-deep-dive.md`
+
+建议在 L2/L3 规格中把该文档的对象/接口条目直接映射到 `design` 与 `codebase_mapping` 字段。

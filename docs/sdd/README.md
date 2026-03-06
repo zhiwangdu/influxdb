@@ -15,6 +15,7 @@
 - `03-workflow-ai-coding.md`：从需求到交付的执行流程。
 - `04-quality-gates-and-playbooks.md`：质量门禁与场景化剧本。
 - `05-spec-example-write-path.yaml`：完整示例规格。
+- `06-architecture-deep-dive.md`：代码流程、对象/接口职责、并发与生命周期深潜。
 - `schema/spec.schema.json`：机器可校验 JSON Schema。
 - `../../specs/templates/spec.template.yaml`：可复制的规格模板。
 - `../../tools/sdd/validate_spec.py`：本地规格校验脚本。
