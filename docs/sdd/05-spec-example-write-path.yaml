@@ -1,0 +1,114 @@
+id: "SPEC-2026-001"
+title: "HTTP 写入链路新增可选请求去重标记"
+status: draft
+owner: "storage-team"
+reviewers: ["query-team", "sre"]
+
+context:
+  background: "在高并发重试场景下，客户端希望显式声明去重键，降低重复写放大。"
+  goals:
+    - "新增可选去重参数，不影响默认写入路径"
+    - "确保查询可见性与一致性不退化"
+  non_goals:
+    - "不改变 line protocol 语法"
+
+scope:
+  in_scope:
+    - "services/httpd"
+    - "coordinator"
+  out_of_scope:
+    - "tsdb 存储格式变更"
+
+codebase_mapping:
+  entrypoints:
+    - "cmd/influxd"
+  packages:
+    - "services/httpd"
+    - "coordinator"
+    - "query"
+  configs:
+    - "[http].*"
+
+contracts:
+  api:
+    - name: "POST /write"
+      change_type: additive
+      request_contract: "支持可选参数 dedup_key，长度 <= 128"
+      response_contract: "默认行为不变；参数非法返回 400 且错误码稳定"
+  data:
+    - name: "写入去重缓存"
+      compatibility: backward
+      migration: "无需迁移，冷启动后缓存为空"
+  config:
+    - key: "[http].write-dedup-enabled"
+      default: false
+      dynamic_reload: false
+      compatibility: "默认关闭，完全向后兼容"
+
+nfr:
+  performance:
+    baseline: "当前写入吞吐基线由现网压测给出"
+    target: "开启去重后吞吐下降不超过 5%"
+  reliability:
+    slo: "写入错误率不高于基线 +0.1%"
+  security:
+    authn_authz: "不新增鉴权模型"
+    data_safety: "去重缓存仅驻内存，不持久化"
+  observability:
+    metrics:
+      - "write_dedup_hit_total"
+      - "write_dedup_miss_total"
+    logs:
+      - "参数非法审计日志"
+    traces:
+      - "写入请求链路增加 dedup decision tag"
+
+design:
+  approach: "在 HTTP 层解析参数并透传至协调层，由协调层执行短窗口去重判断。"
+  alternatives:
+    - option: "在 TSDB 层去重"
+      pros: ["更接近数据层"]
+      cons: ["侵入存储路径，风险高"]
+  risks:
+    - risk: "高基数字段导致缓存膨胀"
+      mitigation: "固定窗口 + LRU 上限 + 指标告警"
+
+implementation_plan:
+  milestones:
+    - name: "M1 契约与参数解析"
+      tasks:
+        - "HTTP 参数校验与错误码测试"
+    - name: "M2 协调层去重逻辑"
+      tasks:
+        - "去重缓存与并发保护"
+    - name: "M3 观测性与文档"
+      tasks:
+        - "指标、日志、文档补齐"
+  feature_flags:
+    - name: "write_dedup_enabled"
+      default: false
+
+validation:
+  unit_tests:
+    - "services/httpd 参数校验测试"
+    - "coordinator 去重命中/未命中测试"
+  integration_tests:
+    - "端到端写入与查询一致性"
+  performance_tests:
+    - "开启/关闭开关的吞吐对比压测"
+  regression_tests:
+    - "重试写入重复点问题回归"
+  manual_checks:
+    - "灰度环境观测 dedup 命中率和延迟"
+
+release_and_rollback:
+  rollout: "灰度按实例分批开启"
+  rollback: "关闭特性开关并重启服务"
+  data_recovery: "无需数据恢复，逻辑可逆"
+
+traceability:
+  related_issues: ["#TBD"]
+  related_prs: []
+  affected_docs:
+    - "配置文档"
+    - "HTTP API 文档"
