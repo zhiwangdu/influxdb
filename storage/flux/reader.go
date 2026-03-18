@@ -706,8 +706,10 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 
 	// these resources must be closed if not nil on return
 	var (
-		cur   cursors.Cursor
-		table storageTable
+		cur         cursors.Cursor
+		table       storageTable
+		pendingCur  cursors.Cursor
+		pendingTags models.Tags
 	)
 
 	defer func() {
@@ -724,11 +726,6 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 		wai.cache.Release()
 	}()
 
-	var (
-		pendingCur  cursors.Cursor
-		pendingTags models.Tags
-	)
-
 	loadNextCursor := func() (cursors.Cursor, models.Tags, bool) {
 		if pendingCur != nil {
 			nextCur, nextTags := pendingCur, pendingTags
@@ -742,7 +739,7 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 				// no data for series key + field combination
 				continue
 			}
-			return nextCur, rs.Tags(), true
+			return nextCur, rs.Tags().Clone(), true
 		}
 		return nil, nil, false
 	}
@@ -770,7 +767,8 @@ READ:
 				if !ok {
 					break
 				}
-				if !tags.Equal(nextTags) {
+				nextKey := defaultGroupKeyForSeries(nextTags, bnds)
+				if !key.Equal(nextKey) {
 					pendingCur, pendingTags = nextCur, nextTags
 					break
 				}
@@ -806,7 +804,8 @@ READ:
 				if !ok {
 					break
 				}
-				if !tags.Equal(nextTags) {
+				nextKey := defaultGroupKeyForSeries(nextTags, bnds)
+				if !key.Equal(nextKey) {
 					pendingCur, pendingTags = nextCur, nextTags
 					break
 				}
@@ -838,7 +837,8 @@ READ:
 				if !ok {
 					break
 				}
-				if !tags.Equal(nextTags) {
+				nextKey := defaultGroupKeyForSeries(nextTags, bnds)
+				if !key.Equal(nextKey) {
 					pendingCur, pendingTags = nextCur, nextTags
 					break
 				}
@@ -870,7 +870,8 @@ READ:
 				if !ok {
 					break
 				}
-				if !tags.Equal(nextTags) {
+				nextKey := defaultGroupKeyForSeries(nextTags, bnds)
+				if !key.Equal(nextKey) {
 					pendingCur, pendingTags = nextCur, nextTags
 					break
 				}
@@ -902,7 +903,8 @@ READ:
 				if !ok {
 					break
 				}
-				if !tags.Equal(nextTags) {
+				nextKey := defaultGroupKeyForSeries(nextTags, bnds)
+				if !key.Equal(nextKey) {
 					pendingCur, pendingTags = nextCur, nextTags
 					break
 				}
