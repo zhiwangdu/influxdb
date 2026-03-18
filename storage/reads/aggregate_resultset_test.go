@@ -174,6 +174,31 @@ func TestNewWindowAggregateResultSet_Stats(t *testing.T) {
 	}
 }
 
+func TestWindowAggregateResultSet_MergesConsecutiveSeriesRows(t *testing.T) {
+	newCursor := newMockReadCursor(
+		"clicks,host=a value=1 1",
+		"clicks,host=a value=2 2",
+	)
+
+	request := datatypes.ReadWindowAggregateRequest{
+		Aggregate: []*datatypes.Aggregate{
+			{Type: datatypes.Aggregate_AggregateTypeMean},
+		},
+	}
+
+	resultSet, err := reads.NewWindowAggregateResultSet(context.Background(), &request, &newCursor)
+	if err != nil {
+		t.Fatalf("error creating WindowAggregateResultSet: %s", err)
+	}
+
+	if !resultSet.Next() {
+		t.Fatal("expected first merged result")
+	}
+	if resultSet.Next() {
+		t.Fatal("expected consecutive rows for same series to be merged into one result")
+	}
+}
+
 // A mean window aggregate is supported
 func TestNewWindowAggregateResultSet_Mean(t *testing.T) {
 

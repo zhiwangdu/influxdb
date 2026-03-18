@@ -40,3 +40,18 @@ func TestNewFilteredResultSet_TimeRange(t *testing.T) {
 		t.Fatal("expected result")
 	}
 }
+
+func TestFilteredResultSet_MergesConsecutiveSeriesRows(t *testing.T) {
+	newCursor := newMockReadCursor(
+		"clicks,host=a value=1 1",
+		"clicks,host=a value=2 2",
+	)
+
+	resultSet := reads.NewFilteredResultSet(context.Background(), 0, 30, &newCursor)
+	if !resultSet.Next() {
+		t.Fatal("expected first merged result")
+	}
+	if resultSet.Next() {
+		t.Fatal("expected consecutive rows for same series to be merged into one result")
+	}
+}
