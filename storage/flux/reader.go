@@ -704,11 +704,29 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 		return err
 	}
 
+	// For bare last() pushdown (selector + no explicit time column), the storage
+	// layer may return the same series in multiple ResultSet chunks. Emitting each
+	// chunk directly as an output table produces duplicate logical tables for one
+	// group key. Buffer and merge those chunks by key here, then emit once.
+	mergeLastSelectorTables := selector &&
+		timeColumn == "" &&
+		len(wai.spec.Aggregates) > 0 &&
+		wai.spec.Aggregates[0] == LastKind
+
 	// these resources must be closed if not nil on return
 	var (
 		cur   cursors.Cursor
 		table storageTable
 	)
+	var (
+		lastSelectorTablesByKey map[string]flux.Table
+		lastSelectorTableTimes  map[string]execute.Time
+		lastSelectorKeyOrder    []string
+	)
+	if mergeLastSelectorTables {
+		lastSelectorTablesByKey = make(map[string]flux.Table)
+		lastSelectorTableTimes = make(map[string]execute.Time)
+	}
 
 	defer func() {
 		if table != nil {
@@ -815,16 +833,49 @@ READ:
 		cur = nil
 
 		if !table.Empty() {
-			if err := f(table); err != nil {
-				table.Close()
-				table = nil
-				return err
-			}
-			select {
-			case <-done:
-			case <-wai.ctx.Done():
-				table.Cancel()
-				break READ
+			if mergeLastSelectorTables {
+				copied, err := execute.CopyTable(table)
+				if err != nil {
+					table.Close()
+					table = nil
+					return err
+				}
+
+				maxTime, hasRows, err := maxTableTime(copied)
+				if err != nil {
+					copied.Done()
+					table.Close()
+					table = nil
+					return err
+				}
+				if hasRows {
+					keyStr := table.Key().String()
+					if prevTime, ok := lastSelectorTableTimes[keyStr]; !ok || maxTime > prevTime {
+						if prev, hasPrev := lastSelectorTablesByKey[keyStr]; hasPrev {
+							prev.Done()
+						} else {
+							lastSelectorKeyOrder = append(lastSelectorKeyOrder, keyStr)
+						}
+						lastSelectorTablesByKey[keyStr] = copied
+						lastSelectorTableTimes[keyStr] = maxTime
+					} else {
+						copied.Done()
+					}
+				} else {
+					copied.Done()
+				}
+			} else {
+				if err := f(table); err != nil {
+					table.Close()
+					table = nil
+					return err
+				}
+				select {
+				case <-done:
+				case <-wai.ctx.Done():
+					table.Cancel()
+					break READ
+				}
 			}
 		}
 
@@ -834,7 +885,58 @@ READ:
 		table.Close()
 		table = nil
 	}
+
+	if mergeLastSelectorTables {
+		for _, key := range lastSelectorKeyOrder {
+			tbl := lastSelectorTablesByKey[key]
+			if tbl == nil {
+				continue
+			}
+			if err := f(tbl); err != nil {
+				tbl.Done()
+				for _, remainingKey := range lastSelectorKeyOrder {
+					if remainingKey == key {
+						continue
+					}
+					if remaining := lastSelectorTablesByKey[remainingKey]; remaining != nil {
+						remaining.Done()
+					}
+				}
+				return err
+			}
+			tbl.Done()
+		}
+	}
+
 	return rs.Err()
+}
+
+func maxTableTime(tbl flux.Table) (execute.Time, bool, error) {
+	cols := tbl.Cols()
+	timeIdx := execute.ColIdx(execute.DefaultTimeColLabel, cols)
+	if timeIdx < 0 {
+		return 0, false, fmt.Errorf("window aggregate selector table missing %s column", execute.DefaultTimeColLabel)
+	}
+
+	var (
+		maxTime execute.Time
+		hasRows bool
+	)
+	err := tbl.Do(func(cr flux.ColReader) error {
+		if cr.Len() == 0 {
+			return nil
+		}
+		ts := cr.Times(timeIdx)
+		for i := 0; i < cr.Len(); i++ {
+			t := execute.Time(ts.Value(i))
+			if !hasRows || t > maxTime {
+				maxTime = t
+				hasRows = true
+			}
+		}
+		return nil
+	})
+	return maxTime, hasRows, err
 }
 
 func isAggregateCount(kind plan.ProcedureKind) bool {
