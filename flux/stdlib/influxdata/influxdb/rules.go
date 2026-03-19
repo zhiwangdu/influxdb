@@ -686,6 +686,7 @@ var windowPushableAggs = []plan.ProcedureKind{
 	universe.MaxKind,
 	universe.MeanKind,
 	universe.FirstKind,
+	universe.LastKind,
 }
 
 func (rule PushDownWindowAggregateRule) Pattern() plan.Pattern {
@@ -847,7 +848,9 @@ func (p PushDownBareAggregateRule) Pattern() plan.Pattern {
 
 func (p PushDownBareAggregateRule) Rewrite(ctx context.Context, pn plan.Node) (plan.Node, bool, error) {
 	fnNode := pn
-	if !canPushWindowedAggregate(ctx, fnNode) {
+	// Keep bare last() pushdown to avoid duplicate-table-key runtime errors
+	// when storage returns one series in multiple table chunks.
+	if fnNode.Kind() != universe.LastKind && !canPushWindowedAggregate(ctx, fnNode) {
 		return pn, false, nil
 	}
 

@@ -1306,10 +1306,10 @@ func TestPushDownWindowAggregateRule(t *testing.T) {
 
 	// ReadRange -> window -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
-		Context: context.Background(),
-		Name:    "NoPushDownLast",
-		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
-		Before:  simplePlanWithWindowAgg(window1m, universe.LastKind, lastProcedureSpec()),
+		Context:  context.Background(),
+		Name:     "NoPushDownLast",
+		Rules:    []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
+		Before:   simplePlanWithWindowAgg(window1m, universe.LastKind, lastProcedureSpec()),
 		NoChange: true,
 	})
 
@@ -1371,19 +1371,19 @@ func TestPushDownWindowAggregateRule(t *testing.T) {
 
 	// ReadRange -> window(every: 1mo) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
-		Context: context.Background(),
-		Name:    "WindowByMonthNoPushDownLast",
-		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
-		Before:  simplePlanWithWindowAgg(window1mo, universe.LastKind, lastProcedureSpec()),
+		Context:  context.Background(),
+		Name:     "WindowByMonthNoPushDownLast",
+		Rules:    []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
+		Before:   simplePlanWithWindowAgg(window1mo, universe.LastKind, lastProcedureSpec()),
 		NoChange: true,
 	})
 
 	// ReadRange -> window(every: 1y) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
-		Context: context.Background(),
-		Name:    "WindowByYearNoPushDownLast",
-		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
-		Before:  simplePlanWithWindowAgg(window1y, universe.LastKind, lastProcedureSpec()),
+		Context:  context.Background(),
+		Name:     "WindowByYearNoPushDownLast",
+		Rules:    []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
+		Before:   simplePlanWithWindowAgg(window1y, universe.LastKind, lastProcedureSpec()),
 		NoChange: true,
 	})
 
@@ -1994,9 +1994,9 @@ func TestPushDownBareAggregateRule(t *testing.T) {
 			},
 		},
 		{
-			// ReadRange -> last (no pushdown)
+			// ReadRange -> last => ReadWindowAggregate
 			Context: context.Background(),
-			Name:    "no push down last",
+			Name:    "push down last",
 			Rules:   []plan.Rule{influxdb.PushDownBareAggregateRule{}},
 			Before: &plantest.PlanSpec{
 				Nodes: []plan.Node{
@@ -2007,7 +2007,11 @@ func TestPushDownBareAggregateRule(t *testing.T) {
 					{0, 1},
 				},
 			},
-			NoChange: true,
+			After: &plantest.PlanSpec{
+				Nodes: []plan.Node{
+					plan.CreatePhysicalNode("ReadWindowAggregate", readWindowAggregate(universe.LastKind)),
+				},
+			},
 		},
 	}
 
