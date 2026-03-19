@@ -686,7 +686,6 @@ var windowPushableAggs = []plan.ProcedureKind{
 	universe.MaxKind,
 	universe.MeanKind,
 	universe.FirstKind,
-	universe.LastKind,
 }
 
 func (rule PushDownWindowAggregateRule) Pattern() plan.Pattern {
@@ -719,8 +718,9 @@ func canPushWindowedAggregate(ctx context.Context, fnNode plan.Node) bool {
 		firstSpec := fnNode.ProcedureSpec().(*universe.FirstProcedureSpec)
 		return firstSpec.Column == execute.DefaultValueColLabel
 	case universe.LastKind:
-		lastSpec := fnNode.ProcedureSpec().(*universe.LastProcedureSpec)
-		return lastSpec.Column == execute.DefaultValueColLabel
+		// Avoid pushing down last() so Flux can merge all input batches
+		// and compute a single final value per series.
+		return false
 	}
 	return true
 }
@@ -875,7 +875,6 @@ func (rule PushDownGroupAggregateRule) Pattern() plan.Pattern {
 			universe.CountKind,
 			universe.SumKind,
 			universe.FirstKind,
-			universe.LastKind,
 			universe.MinKind,
 			universe.MaxKind,
 		},
@@ -921,15 +920,6 @@ func (PushDownGroupAggregateRule) Rewrite(ctx context.Context, pn plan.Node) (pl
 			AggregateMethod:   universe.FirstKind,
 		})
 		return node, true, nil
-	case universe.LastKind:
-		// ReadGroup() -> last => ReadGroup(last)
-		node := plan.CreateUniquePhysicalNode(ctx, "ReadGroupAggregate", &ReadGroupPhysSpec{
-			ReadRangePhysSpec: group.ReadRangePhysSpec,
-			GroupMode:         group.GroupMode,
-			GroupKeys:         group.GroupKeys,
-			AggregateMethod:   universe.LastKind,
-		})
-		return node, true, nil
 	case universe.MinKind:
 		// ReadGroup() -> min => ReadGroup(min)
 		node := plan.CreateUniquePhysicalNode(ctx, "ReadGroupAggregate", &ReadGroupPhysSpec{
@@ -962,9 +952,6 @@ func canPushGroupedAggregate(ctx context.Context, pn plan.Node) bool {
 		return len(agg.Columns) == 1 && agg.Columns[0] == execute.DefaultValueColLabel
 	case universe.FirstKind:
 		agg := pn.ProcedureSpec().(*universe.FirstProcedureSpec)
-		return agg.Column == execute.DefaultValueColLabel
-	case universe.LastKind:
-		agg := pn.ProcedureSpec().(*universe.LastProcedureSpec)
 		return agg.Column == execute.DefaultValueColLabel
 	case universe.MaxKind:
 		agg := pn.ProcedureSpec().(*universe.MaxProcedureSpec)

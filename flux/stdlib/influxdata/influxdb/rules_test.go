@@ -1304,13 +1304,13 @@ func TestPushDownWindowAggregateRule(t *testing.T) {
 		After:   simpleResult(universe.FirstKind, false),
 	})
 
-	// ReadRange -> window -> last => ReadWindowAggregate
+	// ReadRange -> window -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "SimplePassLast",
+		Name:    "NoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before:  simplePlanWithWindowAgg(window1m, universe.LastKind, lastProcedureSpec()),
-		After:   simpleResult(universe.LastKind, false),
+		NoChange: true,
 	})
 
 	// Rewrite with successors
@@ -1351,10 +1351,10 @@ func TestPushDownWindowAggregateRule(t *testing.T) {
 		},
 	})
 
-	// ReadRange -> window(offset: ...) -> last => ReadWindowAggregate
+	// ReadRange -> window(offset: ...) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "WindowPositiveOffset",
+		Name:    "WindowPositiveOffsetNoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before: simplePlanWithWindowAgg(universe.WindowProcedureSpec{
 			Window: plan.WindowSpec{
@@ -1366,94 +1366,51 @@ func TestPushDownWindowAggregateRule(t *testing.T) {
 			StartColumn: "_start",
 			StopColumn:  "_stop",
 		}, universe.LastKind, lastProcedureSpec()),
-		After: &plantest.PlanSpec{
-			Nodes: []plan.Node{
-				plan.CreatePhysicalNode("ReadWindowAggregate", &influxdb.ReadWindowAggregatePhysSpec{
-					ReadRangePhysSpec: *createRangeSpec(),
-					Aggregates:        []plan.ProcedureKind{universe.LastKind},
-					WindowEvery:       flux.ConvertDuration(120000000000 * time.Nanosecond),
-					Offset:            flux.ConvertDuration(60000000000 * time.Nanosecond),
-				}),
-			},
-		},
+		NoChange: true,
 	})
 
-	// ReadRange -> window(every: 1mo) -> last => ReadWindowAggregate
+	// ReadRange -> window(every: 1mo) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "WindowByMonth",
+		Name:    "WindowByMonthNoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before:  simplePlanWithWindowAgg(window1mo, universe.LastKind, lastProcedureSpec()),
-		After: &plantest.PlanSpec{
-			Nodes: []plan.Node{
-				plan.CreatePhysicalNode("ReadWindowAggregate", &influxdb.ReadWindowAggregatePhysSpec{
-					ReadRangePhysSpec: *createRangeSpec(),
-					Aggregates:        []plan.ProcedureKind{universe.LastKind},
-					WindowEvery:       dur1mo,
-				}),
-			},
-		},
+		NoChange: true,
 	})
 
-	// ReadRange -> window(every: 1y) -> last => ReadWindowAggregate
+	// ReadRange -> window(every: 1y) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "WindowByYear",
+		Name:    "WindowByYearNoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before:  simplePlanWithWindowAgg(window1y, universe.LastKind, lastProcedureSpec()),
-		After: &plantest.PlanSpec{
-			Nodes: []plan.Node{
-				plan.CreatePhysicalNode("ReadWindowAggregate", &influxdb.ReadWindowAggregatePhysSpec{
-					ReadRangePhysSpec: *createRangeSpec(),
-					Aggregates:        []plan.ProcedureKind{universe.LastKind},
-					WindowEvery:       dur1y,
-				}),
-			},
-		},
+		NoChange: true,
 	})
 
-	// ReadRange -> window(every: 1y, offset: 1mo) -> last => ReadWindowAggregate
+	// ReadRange -> window(every: 1y, offset: 1mo) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "WindowMonthlyOffset",
+		Name:    "WindowMonthlyOffsetNoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before: simplePlanWithWindowAgg(func() universe.WindowProcedureSpec {
 			spec := window1y
 			spec.Window.Offset = dur1mo
 			return spec
 		}(), universe.LastKind, lastProcedureSpec()),
-		After: &plantest.PlanSpec{
-			Nodes: []plan.Node{
-				plan.CreatePhysicalNode("ReadWindowAggregate", &influxdb.ReadWindowAggregatePhysSpec{
-					ReadRangePhysSpec: *createRangeSpec(),
-					Aggregates:        []plan.ProcedureKind{universe.LastKind},
-					WindowEvery:       dur1y,
-					Offset:            dur1mo,
-				}),
-			},
-		},
+		NoChange: true,
 	})
 
-	// ReadRange -> window(every: 1y, offset: 1mo5m) -> last => ReadWindowAggregate
+	// ReadRange -> window(every: 1y, offset: 1mo5m) -> last (no pushdown)
 	tests = append(tests, plantest.RuleTestCase{
 		Context: context.Background(),
-		Name:    "WindowMixedOffset",
+		Name:    "WindowMixedOffsetNoPushDownLast",
 		Rules:   []plan.Rule{influxdb.PushDownWindowAggregateRule{}},
 		Before: simplePlanWithWindowAgg(func() universe.WindowProcedureSpec {
 			spec := window1y
 			spec.Window.Offset = durMixed
 			return spec
 		}(), universe.LastKind, lastProcedureSpec()),
-		After: &plantest.PlanSpec{
-			Nodes: []plan.Node{
-				plan.CreatePhysicalNode("ReadWindowAggregate", &influxdb.ReadWindowAggregatePhysSpec{
-					ReadRangePhysSpec: *createRangeSpec(),
-					Aggregates:        []plan.ProcedureKind{universe.LastKind},
-					WindowEvery:       dur1y,
-					Offset:            durMixed,
-				}),
-			},
-		},
+		NoChange: true,
 	})
 
 	// Helper that adds a test with a simple plan that does not pass due to a
@@ -2037,9 +1994,9 @@ func TestPushDownBareAggregateRule(t *testing.T) {
 			},
 		},
 		{
-			// ReadRange -> last => ReadWindowAggregate
+			// ReadRange -> last (no pushdown)
 			Context: context.Background(),
-			Name:    "push down last",
+			Name:    "no push down last",
 			Rules:   []plan.Rule{influxdb.PushDownBareAggregateRule{}},
 			Before: &plantest.PlanSpec{
 				Nodes: []plan.Node{
@@ -2050,11 +2007,7 @@ func TestPushDownBareAggregateRule(t *testing.T) {
 					{0, 1},
 				},
 			},
-			After: &plantest.PlanSpec{
-				Nodes: []plan.Node{
-					plan.CreatePhysicalNode("ReadWindowAggregate", readWindowAggregate(universe.LastKind)),
-				},
-			},
+			NoChange: true,
 		},
 	}
 
