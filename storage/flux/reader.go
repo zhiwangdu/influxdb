@@ -1014,7 +1014,7 @@ func newIntegerConcatArrayCursor(arrays []*cursors.IntegerArray, stats cursors.C
 
 func (c *integerConcatArrayCursor) Next() *cursors.IntegerArray {
 	if c.i >= len(c.arrays) {
-		return nil
+		return &cursors.IntegerArray{}
 	}
 	a := c.arrays[c.i]
 	c.i++
@@ -1035,7 +1035,7 @@ func newFloatConcatArrayCursor(arrays []*cursors.FloatArray, stats cursors.Curso
 }
 func (c *floatConcatArrayCursor) Next() *cursors.FloatArray {
 	if c.i >= len(c.arrays) {
-		return nil
+		return &cursors.FloatArray{}
 	}
 	a := c.arrays[c.i]
 	c.i++
@@ -1056,7 +1056,7 @@ func newUnsignedConcatArrayCursor(arrays []*cursors.UnsignedArray, stats cursors
 }
 func (c *unsignedConcatArrayCursor) Next() *cursors.UnsignedArray {
 	if c.i >= len(c.arrays) {
-		return nil
+		return &cursors.UnsignedArray{}
 	}
 	a := c.arrays[c.i]
 	c.i++
@@ -1077,7 +1077,7 @@ func newBooleanConcatArrayCursor(arrays []*cursors.BooleanArray, stats cursors.C
 }
 func (c *booleanConcatArrayCursor) Next() *cursors.BooleanArray {
 	if c.i >= len(c.arrays) {
-		return nil
+		return &cursors.BooleanArray{}
 	}
 	a := c.arrays[c.i]
 	c.i++
@@ -1098,7 +1098,7 @@ func newStringConcatArrayCursor(arrays []*cursors.StringArray, stats cursors.Cur
 }
 func (c *stringConcatArrayCursor) Next() *cursors.StringArray {
 	if c.i >= len(c.arrays) {
-		return nil
+		return &cursors.StringArray{}
 	}
 	a := c.arrays[c.i]
 	c.i++
