@@ -775,18 +775,31 @@ READ:
 		hasTimeCol := timeColumn != ""
 		switch typedCur := cur.(type) {
 		case cursors.IntegerArrayCursor:
-			typedCur = newIntegerConcatArrayCursor(typedCur, func() (cursors.IntegerArrayCursor, bool, error) {
+			var stats cursors.CursorStats
+			arrays, err := readAllIntegerArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
 				nextCur, ok, err := loadCursorForGroupKey(key)
 				if !ok || err != nil {
-					return nil, ok, err
+					if err != nil {
+						return err
+					}
+					break
 				}
 				nextTypedCur, ok := nextCur.(cursors.IntegerArrayCursor)
 				if !ok {
 					nextCur.Close()
-					return nil, false, &GroupCursorError{typ: "integer", cursor: nextCur}
+					return &GroupCursorError{typ: "integer", cursor: nextCur}
 				}
-				return nextTypedCur, true, nil
-			})
+				nextArrays, err := readAllIntegerArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newIntegerConcatArrayCursor(arrays, stats)
 			if !selector {
 				var fillValue *int64
 				if isAggregateCount(wai.spec.Aggregates[0]) {
@@ -805,18 +818,31 @@ READ:
 				table = newIntegerWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.FloatArrayCursor:
-			typedCur = newFloatConcatArrayCursor(typedCur, func() (cursors.FloatArrayCursor, bool, error) {
+			var stats cursors.CursorStats
+			arrays, err := readAllFloatArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
 				nextCur, ok, err := loadCursorForGroupKey(key)
 				if !ok || err != nil {
-					return nil, ok, err
+					if err != nil {
+						return err
+					}
+					break
 				}
 				nextTypedCur, ok := nextCur.(cursors.FloatArrayCursor)
 				if !ok {
 					nextCur.Close()
-					return nil, false, &GroupCursorError{typ: "float", cursor: nextCur}
+					return &GroupCursorError{typ: "float", cursor: nextCur}
 				}
-				return nextTypedCur, true, nil
-			})
+				nextArrays, err := readAllFloatArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newFloatConcatArrayCursor(arrays, stats)
 			if !selector {
 				cols, defs := determineTableColsForWindowAggregate(tags, flux.TFloat, hasTimeCol)
 				table = newFloatWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
@@ -831,18 +857,31 @@ READ:
 				table = newFloatWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.UnsignedArrayCursor:
-			typedCur = newUnsignedConcatArrayCursor(typedCur, func() (cursors.UnsignedArrayCursor, bool, error) {
+			var stats cursors.CursorStats
+			arrays, err := readAllUnsignedArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
 				nextCur, ok, err := loadCursorForGroupKey(key)
 				if !ok || err != nil {
-					return nil, ok, err
+					if err != nil {
+						return err
+					}
+					break
 				}
 				nextTypedCur, ok := nextCur.(cursors.UnsignedArrayCursor)
 				if !ok {
 					nextCur.Close()
-					return nil, false, &GroupCursorError{typ: "unsigned", cursor: nextCur}
+					return &GroupCursorError{typ: "unsigned", cursor: nextCur}
 				}
-				return nextTypedCur, true, nil
-			})
+				nextArrays, err := readAllUnsignedArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newUnsignedConcatArrayCursor(arrays, stats)
 			if !selector {
 				cols, defs := determineTableColsForWindowAggregate(tags, flux.TUInt, hasTimeCol)
 				table = newUnsignedWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
@@ -857,18 +896,31 @@ READ:
 				table = newUnsignedWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.BooleanArrayCursor:
-			typedCur = newBooleanConcatArrayCursor(typedCur, func() (cursors.BooleanArrayCursor, bool, error) {
+			var stats cursors.CursorStats
+			arrays, err := readAllBooleanArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
 				nextCur, ok, err := loadCursorForGroupKey(key)
 				if !ok || err != nil {
-					return nil, ok, err
+					if err != nil {
+						return err
+					}
+					break
 				}
 				nextTypedCur, ok := nextCur.(cursors.BooleanArrayCursor)
 				if !ok {
 					nextCur.Close()
-					return nil, false, &GroupCursorError{typ: "boolean", cursor: nextCur}
+					return &GroupCursorError{typ: "boolean", cursor: nextCur}
 				}
-				return nextTypedCur, true, nil
-			})
+				nextArrays, err := readAllBooleanArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newBooleanConcatArrayCursor(arrays, stats)
 			if !selector {
 				cols, defs := determineTableColsForWindowAggregate(tags, flux.TBool, hasTimeCol)
 				table = newBooleanWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
@@ -883,18 +935,31 @@ READ:
 				table = newBooleanWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.StringArrayCursor:
-			typedCur = newStringConcatArrayCursor(typedCur, func() (cursors.StringArrayCursor, bool, error) {
+			var stats cursors.CursorStats
+			arrays, err := readAllStringArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
 				nextCur, ok, err := loadCursorForGroupKey(key)
 				if !ok || err != nil {
-					return nil, ok, err
+					if err != nil {
+						return err
+					}
+					break
 				}
 				nextTypedCur, ok := nextCur.(cursors.StringArrayCursor)
 				if !ok {
 					nextCur.Close()
-					return nil, false, &GroupCursorError{typ: "string", cursor: nextCur}
+					return &GroupCursorError{typ: "string", cursor: nextCur}
 				}
-				return nextTypedCur, true, nil
-			})
+				nextArrays, err := readAllStringArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newStringConcatArrayCursor(arrays, stats)
 			if !selector {
 				cols, defs := determineTableColsForWindowAggregate(tags, flux.TString, hasTimeCol)
 				table = newStringWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
@@ -938,324 +1003,181 @@ READ:
 }
 
 type integerConcatArrayCursor struct {
-	cur      cursors.IntegerArrayCursor
-	next     func() (cursors.IntegerArrayCursor, bool, error)
-	err      error
-	stats    cursors.CursorStats
-	finished bool
+	arrays []*cursors.IntegerArray
+	i      int
+	stats  cursors.CursorStats
 }
 
-func newIntegerConcatArrayCursor(cur cursors.IntegerArrayCursor, next func() (cursors.IntegerArrayCursor, bool, error)) cursors.IntegerArrayCursor {
-	return &integerConcatArrayCursor{cur: cur, next: next}
+func newIntegerConcatArrayCursor(arrays []*cursors.IntegerArray, stats cursors.CursorStats) cursors.IntegerArrayCursor {
+	return &integerConcatArrayCursor{arrays: arrays, stats: stats}
 }
 
 func (c *integerConcatArrayCursor) Next() *cursors.IntegerArray {
-	for !c.finished {
-		if c.cur == nil {
-			if c.next == nil {
-				c.finished = true
-				return nil
-			}
-			next, ok, err := c.next()
-			if err != nil {
-				c.err = err
-				c.finished = true
-				return nil
-			}
-			if !ok {
-				c.finished = true
-				return nil
-			}
-			c.cur = next
-		}
-
-		if a := c.cur.Next(); a != nil {
-			return a
-		}
-		c.stats.Add(c.cur.Stats())
-		if err := c.cur.Err(); err != nil && c.err == nil {
-			c.err = err
-		}
-		c.cur.Close()
-		c.cur = nil
+	if c.i >= len(c.arrays) {
+		return nil
 	}
-	return nil
+	a := c.arrays[c.i]
+	c.i++
+	return a
 }
-
-func (c *integerConcatArrayCursor) Close() {
-	if c.cur != nil {
-		c.cur.Close()
-		c.cur = nil
-	}
-	c.finished = true
-}
-
-func (c *integerConcatArrayCursor) Err() error {
-	return c.err
-}
-
-func (c *integerConcatArrayCursor) Stats() cursors.CursorStats {
-	stats := c.stats
-	if c.cur != nil {
-		stats.Add(c.cur.Stats())
-	}
-	return stats
-}
+func (c *integerConcatArrayCursor) Close()                     {}
+func (c *integerConcatArrayCursor) Err() error                 { return nil }
+func (c *integerConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
 
 type floatConcatArrayCursor struct {
-	cur      cursors.FloatArrayCursor
-	next     func() (cursors.FloatArrayCursor, bool, error)
-	err      error
-	stats    cursors.CursorStats
-	finished bool
+	arrays []*cursors.FloatArray
+	i      int
+	stats  cursors.CursorStats
 }
 
-func newFloatConcatArrayCursor(cur cursors.FloatArrayCursor, next func() (cursors.FloatArrayCursor, bool, error)) cursors.FloatArrayCursor {
-	return &floatConcatArrayCursor{cur: cur, next: next}
+func newFloatConcatArrayCursor(arrays []*cursors.FloatArray, stats cursors.CursorStats) cursors.FloatArrayCursor {
+	return &floatConcatArrayCursor{arrays: arrays, stats: stats}
 }
-
 func (c *floatConcatArrayCursor) Next() *cursors.FloatArray {
-	for !c.finished {
-		if c.cur == nil {
-			if c.next == nil {
-				c.finished = true
-				return nil
-			}
-			next, ok, err := c.next()
-			if err != nil {
-				c.err = err
-				c.finished = true
-				return nil
-			}
-			if !ok {
-				c.finished = true
-				return nil
-			}
-			c.cur = next
-		}
-		if a := c.cur.Next(); a != nil {
-			return a
-		}
-		c.stats.Add(c.cur.Stats())
-		if err := c.cur.Err(); err != nil && c.err == nil {
-			c.err = err
-		}
-		c.cur.Close()
-		c.cur = nil
+	if c.i >= len(c.arrays) {
+		return nil
 	}
-	return nil
+	a := c.arrays[c.i]
+	c.i++
+	return a
 }
-
-func (c *floatConcatArrayCursor) Close() {
-	if c.cur != nil {
-		c.cur.Close()
-		c.cur = nil
-	}
-	c.finished = true
-}
-
-func (c *floatConcatArrayCursor) Err() error {
-	return c.err
-}
-
-func (c *floatConcatArrayCursor) Stats() cursors.CursorStats {
-	stats := c.stats
-	if c.cur != nil {
-		stats.Add(c.cur.Stats())
-	}
-	return stats
-}
+func (c *floatConcatArrayCursor) Close()                     {}
+func (c *floatConcatArrayCursor) Err() error                 { return nil }
+func (c *floatConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
 
 type unsignedConcatArrayCursor struct {
-	cur      cursors.UnsignedArrayCursor
-	next     func() (cursors.UnsignedArrayCursor, bool, error)
-	err      error
-	stats    cursors.CursorStats
-	finished bool
+	arrays []*cursors.UnsignedArray
+	i      int
+	stats  cursors.CursorStats
 }
 
-func newUnsignedConcatArrayCursor(cur cursors.UnsignedArrayCursor, next func() (cursors.UnsignedArrayCursor, bool, error)) cursors.UnsignedArrayCursor {
-	return &unsignedConcatArrayCursor{cur: cur, next: next}
+func newUnsignedConcatArrayCursor(arrays []*cursors.UnsignedArray, stats cursors.CursorStats) cursors.UnsignedArrayCursor {
+	return &unsignedConcatArrayCursor{arrays: arrays, stats: stats}
 }
-
 func (c *unsignedConcatArrayCursor) Next() *cursors.UnsignedArray {
-	for !c.finished {
-		if c.cur == nil {
-			if c.next == nil {
-				c.finished = true
-				return nil
-			}
-			next, ok, err := c.next()
-			if err != nil {
-				c.err = err
-				c.finished = true
-				return nil
-			}
-			if !ok {
-				c.finished = true
-				return nil
-			}
-			c.cur = next
-		}
-		if a := c.cur.Next(); a != nil {
-			return a
-		}
-		c.stats.Add(c.cur.Stats())
-		if err := c.cur.Err(); err != nil && c.err == nil {
-			c.err = err
-		}
-		c.cur.Close()
-		c.cur = nil
+	if c.i >= len(c.arrays) {
+		return nil
 	}
-	return nil
+	a := c.arrays[c.i]
+	c.i++
+	return a
 }
-
-func (c *unsignedConcatArrayCursor) Close() {
-	if c.cur != nil {
-		c.cur.Close()
-		c.cur = nil
-	}
-	c.finished = true
-}
-
-func (c *unsignedConcatArrayCursor) Err() error {
-	return c.err
-}
-
-func (c *unsignedConcatArrayCursor) Stats() cursors.CursorStats {
-	stats := c.stats
-	if c.cur != nil {
-		stats.Add(c.cur.Stats())
-	}
-	return stats
-}
+func (c *unsignedConcatArrayCursor) Close()                     {}
+func (c *unsignedConcatArrayCursor) Err() error                 { return nil }
+func (c *unsignedConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
 
 type booleanConcatArrayCursor struct {
-	cur      cursors.BooleanArrayCursor
-	next     func() (cursors.BooleanArrayCursor, bool, error)
-	err      error
-	stats    cursors.CursorStats
-	finished bool
+	arrays []*cursors.BooleanArray
+	i      int
+	stats  cursors.CursorStats
 }
 
-func newBooleanConcatArrayCursor(cur cursors.BooleanArrayCursor, next func() (cursors.BooleanArrayCursor, bool, error)) cursors.BooleanArrayCursor {
-	return &booleanConcatArrayCursor{cur: cur, next: next}
+func newBooleanConcatArrayCursor(arrays []*cursors.BooleanArray, stats cursors.CursorStats) cursors.BooleanArrayCursor {
+	return &booleanConcatArrayCursor{arrays: arrays, stats: stats}
 }
-
 func (c *booleanConcatArrayCursor) Next() *cursors.BooleanArray {
-	for !c.finished {
-		if c.cur == nil {
-			if c.next == nil {
-				c.finished = true
-				return nil
-			}
-			next, ok, err := c.next()
-			if err != nil {
-				c.err = err
-				c.finished = true
-				return nil
-			}
-			if !ok {
-				c.finished = true
-				return nil
-			}
-			c.cur = next
-		}
-		if a := c.cur.Next(); a != nil {
-			return a
-		}
-		c.stats.Add(c.cur.Stats())
-		if err := c.cur.Err(); err != nil && c.err == nil {
-			c.err = err
-		}
-		c.cur.Close()
-		c.cur = nil
+	if c.i >= len(c.arrays) {
+		return nil
 	}
-	return nil
+	a := c.arrays[c.i]
+	c.i++
+	return a
 }
-
-func (c *booleanConcatArrayCursor) Close() {
-	if c.cur != nil {
-		c.cur.Close()
-		c.cur = nil
-	}
-	c.finished = true
-}
-
-func (c *booleanConcatArrayCursor) Err() error {
-	return c.err
-}
-
-func (c *booleanConcatArrayCursor) Stats() cursors.CursorStats {
-	stats := c.stats
-	if c.cur != nil {
-		stats.Add(c.cur.Stats())
-	}
-	return stats
-}
+func (c *booleanConcatArrayCursor) Close()                     {}
+func (c *booleanConcatArrayCursor) Err() error                 { return nil }
+func (c *booleanConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
 
 type stringConcatArrayCursor struct {
-	cur      cursors.StringArrayCursor
-	next     func() (cursors.StringArrayCursor, bool, error)
-	err      error
-	stats    cursors.CursorStats
-	finished bool
+	arrays []*cursors.StringArray
+	i      int
+	stats  cursors.CursorStats
 }
 
-func newStringConcatArrayCursor(cur cursors.StringArrayCursor, next func() (cursors.StringArrayCursor, bool, error)) cursors.StringArrayCursor {
-	return &stringConcatArrayCursor{cur: cur, next: next}
+func newStringConcatArrayCursor(arrays []*cursors.StringArray, stats cursors.CursorStats) cursors.StringArrayCursor {
+	return &stringConcatArrayCursor{arrays: arrays, stats: stats}
 }
-
 func (c *stringConcatArrayCursor) Next() *cursors.StringArray {
-	for !c.finished {
-		if c.cur == nil {
-			if c.next == nil {
-				c.finished = true
-				return nil
-			}
-			next, ok, err := c.next()
-			if err != nil {
-				c.err = err
-				c.finished = true
-				return nil
-			}
-			if !ok {
-				c.finished = true
-				return nil
-			}
-			c.cur = next
-		}
-		if a := c.cur.Next(); a != nil {
-			return a
-		}
-		c.stats.Add(c.cur.Stats())
-		if err := c.cur.Err(); err != nil && c.err == nil {
-			c.err = err
-		}
-		c.cur.Close()
-		c.cur = nil
+	if c.i >= len(c.arrays) {
+		return nil
 	}
-	return nil
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *stringConcatArrayCursor) Close()                     {}
+func (c *stringConcatArrayCursor) Err() error                 { return nil }
+func (c *stringConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+func readAllIntegerArrays(cur cursors.IntegerArrayCursor, stats *cursors.CursorStats) ([]*cursors.IntegerArray, error) {
+	var arrays []*cursors.IntegerArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.IntegerArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]int64(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
 }
 
-func (c *stringConcatArrayCursor) Close() {
-	if c.cur != nil {
-		c.cur.Close()
-		c.cur = nil
+func readAllFloatArrays(cur cursors.FloatArrayCursor, stats *cursors.CursorStats) ([]*cursors.FloatArray, error) {
+	var arrays []*cursors.FloatArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.FloatArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]float64(nil), a.Values...),
+		})
 	}
-	c.finished = true
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
 }
 
-func (c *stringConcatArrayCursor) Err() error {
-	return c.err
+func readAllUnsignedArrays(cur cursors.UnsignedArrayCursor, stats *cursors.CursorStats) ([]*cursors.UnsignedArray, error) {
+	var arrays []*cursors.UnsignedArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.UnsignedArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]uint64(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
 }
 
-func (c *stringConcatArrayCursor) Stats() cursors.CursorStats {
-	stats := c.stats
-	if c.cur != nil {
-		stats.Add(c.cur.Stats())
+func readAllBooleanArrays(cur cursors.BooleanArrayCursor, stats *cursors.CursorStats) ([]*cursors.BooleanArray, error) {
+	var arrays []*cursors.BooleanArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.BooleanArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]bool(nil), a.Values...),
+		})
 	}
-	return stats
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
+}
+
+func readAllStringArrays(cur cursors.StringArrayCursor, stats *cursors.CursorStats) ([]*cursors.StringArray, error) {
+	var arrays []*cursors.StringArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		values := make([]string, len(a.Values))
+		copy(values, a.Values)
+		arrays = append(arrays, &cursors.StringArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     values,
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
 }
 
 func isAggregateCount(kind plan.ProcedureKind) bool {
