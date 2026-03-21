@@ -34,6 +34,7 @@ import (
 )
 
 const logEvery = 2 * DefaultSegmentSize
+const defaultMaxTSMBatchKeyIteratorMemory = 64 * 1024 * 1024
 
 const (
 	// CompactionTempExtension is the extension used for temporary files created during compaction.
@@ -784,6 +785,10 @@ type Compactor struct {
 
 	FileStore fileStore
 
+	// MaxKeyMergeSize controls when compaction switches from eager per-key block loading
+	// to streaming mode. Values <= 0 fall back to the default threshold.
+	MaxKeyMergeSize int64
+
 	// RateLimit is the limit for disk writes for all concurrent compactions.
 	RateLimit limiter.Rate
 
@@ -809,7 +814,8 @@ type Compactor struct {
 // NewCompactor returns a new instance of Compactor.
 func NewCompactor() *Compactor {
 	return &Compactor{
-		formatFileName: DefaultFormatFileName,
+		formatFileName:  DefaultFormatFileName,
+		MaxKeyMergeSize: defaultMaxTSMBatchKeyIteratorMemory,
 	}
 }
 
@@ -1047,7 +1053,22 @@ func (c *Compactor) compact(fast bool, tsmFiles []string, logger *zap.Logger, po
 		return nil, nil
 	}
 
-	tsm, err := NewTSMBatchKeyIterator(size, fast, DefaultMaxSavedErrors, intC, tsmFiles, trs...)
+	streamingThreshold := c.MaxKeyMergeSize
+	if streamingThreshold <= 0 {
+		streamingThreshold = defaultMaxTSMBatchKeyIteratorMemory
+	}
+	streaming, estimatedMemory, err := shouldStreamTSMBatchKeyIterator(trs, streamingThreshold)
+	if err != nil {
+		return nil, err
+	}
+	if streaming {
+		logger.Info("switching compaction to streaming key merge",
+			zap.Int64("estimated_key_memory_bytes", estimatedMemory),
+			zap.Int64("threshold_bytes", streamingThreshold),
+			zap.Int("file_count", len(tsmFiles)))
+	}
+
+	tsm, err := newTSMBatchKeyIterator(size, fast, DefaultMaxSavedErrors, intC, tsmFiles, streaming, trs...)
 	if err != nil {
 		return nil, err
 	}
@@ -1470,6 +1491,9 @@ type tsmBatchKeyIterator struct {
 	blocks    blocks
 
 	buf []blocks
+	// streaming limits each reader to one prefetched block at a time. This avoids
+	// loading every block for a hot key into memory before merge begins.
+	streaming bool
 
 	// mergeValues are decoded blocks that have been combined
 	mergedFloatValues    *tsdb.FloatArray
@@ -1487,6 +1511,13 @@ type tsmBatchKeyIterator struct {
 	maxErrors int
 	// overflowErrors is the number of errors we have ignored.
 	overflowErrors int
+}
+
+type tsmBatchKeyIteratorEstimate struct {
+	iter  *BlockIterator
+	key   []byte
+	total int64
+	valid bool
 }
 
 // AppendError - store unique errors in the order of first appearance,
@@ -1509,6 +1540,14 @@ func (t *tsmBatchKeyIterator) AppendError(err error) bool {
 // NewTSMBatchKeyIterator returns a new TSM key iterator from readers.
 // size indicates the maximum number of values to encode in a single block.
 func NewTSMBatchKeyIterator(size int, fast bool, maxErrors int, interrupt chan struct{}, tsmFiles []string, readers ...*TSMReader) (KeyIterator, error) {
+	streaming, _, err := shouldStreamTSMBatchKeyIterator(readers, defaultMaxTSMBatchKeyIteratorMemory)
+	if err != nil {
+		return nil, err
+	}
+	return newTSMBatchKeyIterator(size, fast, maxErrors, interrupt, tsmFiles, streaming, readers...)
+}
+
+func newTSMBatchKeyIterator(size int, fast bool, maxErrors int, interrupt chan struct{}, tsmFiles []string, streaming bool, readers ...*TSMReader) (KeyIterator, error) {
 	var iter []*BlockIterator
 	for _, r := range readers {
 		iter = append(iter, r.BlockIterator())
@@ -1522,6 +1561,7 @@ func NewTSMBatchKeyIterator(size int, fast bool, maxErrors int, interrupt chan s
 		size:                 size,
 		iterators:            iter,
 		fast:                 fast,
+		streaming:            streaming,
 		tsmFiles:             tsmFiles,
 		buf:                  make([]blocks, len(iter)),
 		mergedFloatValues:    &tsdb.FloatArray{},
@@ -1532,6 +1572,85 @@ func NewTSMBatchKeyIterator(size int, fast bool, maxErrors int, interrupt chan s
 		interrupt:            interrupt,
 		maxErrors:            maxErrors,
 	}, nil
+}
+
+func shouldStreamTSMBatchKeyIterator(readers []*TSMReader, threshold int64) (bool, int64, error) {
+	if threshold <= 0 {
+		threshold = defaultMaxTSMBatchKeyIteratorMemory
+	}
+	estimated, err := estimateTSMBatchKeyIteratorMemory(readers)
+	if err != nil {
+		return false, 0, err
+	}
+	return estimated > threshold, estimated, nil
+}
+
+func estimateTSMBatchKeyIteratorMemory(readers []*TSMReader) (int64, error) {
+	estimates := make([]tsmBatchKeyIteratorEstimate, len(readers))
+	for i, r := range readers {
+		estimates[i].iter = r.BlockIterator()
+		if err := loadNextTSMBatchKeyEstimate(&estimates[i]); err != nil {
+			return 0, err
+		}
+	}
+
+	var peak int64
+	for {
+		var minKey []byte
+		for i := range estimates {
+			if !estimates[i].valid {
+				continue
+			}
+			if len(minKey) == 0 || bytes.Compare(estimates[i].key, minKey) < 0 {
+				minKey = estimates[i].key
+			}
+		}
+		if len(minKey) == 0 {
+			return peak, nil
+		}
+
+		var current int64
+		for i := range estimates {
+			if !estimates[i].valid || !bytes.Equal(estimates[i].key, minKey) {
+				continue
+			}
+			current += estimates[i].total
+		}
+		if current > peak {
+			peak = current
+		}
+
+		for i := range estimates {
+			if !estimates[i].valid || !bytes.Equal(estimates[i].key, minKey) {
+				continue
+			}
+			if err := loadNextTSMBatchKeyEstimate(&estimates[i]); err != nil {
+				return 0, err
+			}
+		}
+	}
+}
+
+func loadNextTSMBatchKeyEstimate(estimate *tsmBatchKeyIteratorEstimate) error {
+	estimate.key = nil
+	estimate.total = 0
+	estimate.valid = false
+
+	if !estimate.iter.Next() {
+		if err := estimate.iter.Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	estimate.key = estimate.iter.key
+	for _, entry := range estimate.iter.entries {
+		estimate.total += int64(entry.Size)
+	}
+	// Exhaust the current key so the next call advances to the next one.
+	estimate.iter.entries = nil
+	estimate.valid = true
+	return nil
 }
 
 func (k *tsmBatchKeyIterator) hasMergedValues() bool {
@@ -1577,82 +1696,9 @@ RETRY:
 		}
 	}
 
-	// Read the next block from each TSM iterator
-	for i, v := range k.buf {
-		if len(v) != 0 {
-			continue
-		}
-
-		iter := k.iterators[i]
-		k.currentTsm = k.tsmFiles[i]
-		if iter.Next() {
-			key, minTime, maxTime, typ, _, b, err := iter.Read()
-			if err != nil {
-				k.AppendError(errBlockRead{k.currentTsm, err})
-			}
-
-			// This block may have ranges of time removed from it that would
-			// reduce the block min and max time.
-			tombstones := iter.r.TombstoneRange(key)
-
-			var blk *block
-			if cap(k.buf[i]) > len(k.buf[i]) {
-				k.buf[i] = k.buf[i][:len(k.buf[i])+1]
-				blk = k.buf[i][len(k.buf[i])-1]
-				if blk == nil {
-					blk = &block{}
-					k.buf[i][len(k.buf[i])-1] = blk
-				}
-			} else {
-				blk = &block{}
-				k.buf[i] = append(k.buf[i], blk)
-			}
-			blk.minTime = minTime
-			blk.maxTime = maxTime
-			blk.key = key
-			blk.typ = typ
-			blk.b = b
-			blk.tombstones = tombstones
-			blk.readMin = math.MaxInt64
-			blk.readMax = math.MinInt64
-
-			blockKey := key
-			for bytes.Equal(iter.PeekNext(), blockKey) {
-				iter.Next()
-				key, minTime, maxTime, typ, _, b, err := iter.Read()
-				if err != nil {
-					k.AppendError(errBlockRead{k.currentTsm, err})
-				}
-
-				tombstones := iter.r.TombstoneRange(key)
-
-				var blk *block
-				if cap(k.buf[i]) > len(k.buf[i]) {
-					k.buf[i] = k.buf[i][:len(k.buf[i])+1]
-					blk = k.buf[i][len(k.buf[i])-1]
-					if blk == nil {
-						blk = &block{}
-						k.buf[i][len(k.buf[i])-1] = blk
-					}
-				} else {
-					blk = &block{}
-					k.buf[i] = append(k.buf[i], blk)
-				}
-
-				blk.minTime = minTime
-				blk.maxTime = maxTime
-				blk.key = key
-				blk.typ = typ
-				blk.b = b
-				blk.tombstones = tombstones
-				blk.readMin = math.MaxInt64
-				blk.readMax = math.MinInt64
-			}
-		}
-
-		if iter.Err() != nil {
-			k.AppendError(errBlockRead{k.currentTsm, iter.Err()})
-		}
+	// Read the next block from each TSM iterator.
+	for i := range k.buf {
+		k.fillBuffer(i)
 	}
 
 	// Each reader could have a different key that it's currently at, need to find
@@ -1679,8 +1725,13 @@ RETRY:
 			continue
 		}
 		if bytes.Equal(b[0].key, k.key) {
-			k.blocks = append(k.blocks, b...)
-			k.buf[i] = k.buf[i][:0]
+			if k.streaming {
+				k.blocks = append(k.blocks, b[0])
+				k.buf[i] = k.buf[i][:0]
+			} else {
+				k.blocks = append(k.blocks, b...)
+				k.buf[i] = k.buf[i][:0]
+			}
 		}
 	}
 
@@ -1697,6 +1748,71 @@ RETRY:
 	}
 
 	return len(k.merged) > 0
+}
+
+func (k *tsmBatchKeyIterator) fillBuffer(i int) {
+	if len(k.buf[i]) != 0 {
+		return
+	}
+
+	iter := k.iterators[i]
+	k.currentTsm = k.tsmFiles[i]
+	if !iter.Next() {
+		if iter.Err() != nil {
+			k.AppendError(errBlockRead{k.currentTsm, iter.Err()})
+		}
+		return
+	}
+
+	key, minTime, maxTime, typ, _, b, err := iter.Read()
+	if err != nil {
+		k.AppendError(errBlockRead{k.currentTsm, err})
+	}
+	k.appendBufferBlock(i, key, minTime, maxTime, typ, b, iter.r.TombstoneRange(key))
+	if k.streaming {
+		if iter.Err() != nil {
+			k.AppendError(errBlockRead{k.currentTsm, iter.Err()})
+		}
+		return
+	}
+
+	blockKey := key
+	for bytes.Equal(iter.PeekNext(), blockKey) {
+		iter.Next()
+		key, minTime, maxTime, typ, _, b, err = iter.Read()
+		if err != nil {
+			k.AppendError(errBlockRead{k.currentTsm, err})
+		}
+		k.appendBufferBlock(i, key, minTime, maxTime, typ, b, iter.r.TombstoneRange(key))
+	}
+
+	if iter.Err() != nil {
+		k.AppendError(errBlockRead{k.currentTsm, iter.Err()})
+	}
+}
+
+func (k *tsmBatchKeyIterator) appendBufferBlock(i int, key []byte, minTime, maxTime int64, typ byte, b []byte, tombstones []TimeRange) {
+	var blk *block
+	if cap(k.buf[i]) > len(k.buf[i]) {
+		k.buf[i] = k.buf[i][:len(k.buf[i])+1]
+		blk = k.buf[i][len(k.buf[i])-1]
+		if blk == nil {
+			blk = &block{}
+			k.buf[i][len(k.buf[i])-1] = blk
+		}
+	} else {
+		blk = &block{}
+		k.buf[i] = append(k.buf[i], blk)
+	}
+
+	blk.minTime = minTime
+	blk.maxTime = maxTime
+	blk.key = key
+	blk.typ = typ
+	blk.b = b
+	blk.tombstones = tombstones
+	blk.readMin = math.MaxInt64
+	blk.readMax = math.MinInt64
 }
 
 // merge combines the next set of blocks into merged blocks.

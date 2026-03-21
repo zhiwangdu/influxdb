@@ -1271,6 +1271,54 @@ func TestCompactor_CompactFull_InProgress(t *testing.T) {
 	assert.Truef(t, errors.Is(pathErr, fs.ErrExist), "error did not indicate file existence: %v", pathErr)
 }
 
+func TestCompactor_CompactFull_StreamingMerge(t *testing.T) {
+	dir := MustTempDir()
+	defer os.RemoveAll(dir)
+
+	key := "cpu,host=A#!~#value"
+	f1Name := MustWriteTSMBlocks(dir, 1, map[string][][]tsm1.Value{
+		key: {
+			{tsm1.NewValue(1, float64(1)), tsm1.NewValue(3, float64(3))},
+			{tsm1.NewValue(5, float64(5)), tsm1.NewValue(7, float64(7))},
+			{tsm1.NewValue(9, float64(9)), tsm1.NewValue(11, float64(11))},
+		},
+	})
+	f2Name := MustWriteTSMBlocks(dir, 2, map[string][][]tsm1.Value{
+		key: {
+			{tsm1.NewValue(2, float64(2)), tsm1.NewValue(4, float64(4))},
+			{tsm1.NewValue(6, float64(6)), tsm1.NewValue(8, float64(8))},
+			{tsm1.NewValue(10, float64(10)), tsm1.NewValue(12, float64(12))},
+		},
+	})
+
+	ffs := &fakeFileStore{}
+	defer ffs.Close()
+	compactor := tsm1.NewCompactor()
+	compactor.Dir = dir
+	compactor.FileStore = ffs
+	compactor.MaxKeyMergeSize = 1 // Force streaming mode for the test path.
+	compactor.Open()
+
+	files, err := compactor.CompactFull([]string{f1Name, f2Name}, zap.NewNop(), 2)
+	require.NoError(t, err)
+	require.Len(t, files, 1)
+
+	r := MustOpenTSMReader(files[0])
+	defer func() {
+		require.NoError(t, r.Close(), "closing compacted TSM file %s", files[0])
+	}()
+
+	values, err := r.ReadAll([]byte(key))
+	require.NoError(t, err)
+	require.Len(t, values, 12)
+	for i, v := range values {
+		require.Equal(t, int64(i+1), v.UnixNano())
+		require.Equal(t, float64(i+1), v.Value())
+	}
+
+	require.Len(t, r.Entries([]byte(key)), 6)
+}
+
 func newTSMKeyIterator(size int, fast bool, interrupt chan struct{}, readers ...*tsm1.TSMReader) (tsm1.KeyIterator, error) {
 	files := []string{}
 	for _, r := range readers {
@@ -5490,6 +5538,34 @@ func MustWriteTSM(dir string, gen int, values map[string][]tsm1.Value) string {
 	for _, k := range keys {
 		if err := w.Write([]byte(k), values[k]); err != nil {
 			panic(fmt.Sprintf("write TSM value: %v", err))
+		}
+	}
+
+	if err := w.WriteIndex(); err != nil {
+		panic(fmt.Sprintf("write TSM index: %v", err))
+	}
+
+	if err := w.Close(); err != nil {
+		panic(fmt.Sprintf("write TSM close: %v", err))
+	}
+
+	return name
+}
+
+func MustWriteTSMBlocks(dir string, gen int, values map[string][][]tsm1.Value) string {
+	w, name := MustTSMWriter(dir, gen)
+
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		for _, block := range values[k] {
+			if err := w.Write([]byte(k), block); err != nil {
+				panic(fmt.Sprintf("write TSM block: %v", err))
+			}
 		}
 	}
 
