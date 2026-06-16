@@ -41,7 +41,7 @@ We really like to receive feature requests, as it helps us prioritize our work. 
 Contributing to the source code
 ---------------
 
-InfluxDB requires go 1.15 or later and uses go modules to manage dependencies.  This means that all of your Go development is done wherever you choose to check out the source.  There is no need to place the source in your `$GOPATH`.  In fact, we recommend against placing it within `$GOPATH`.
+InfluxDB requires Go 1.26 or later and uses go modules to manage dependencies.  This means that all of your Go development is done wherever you choose to check out the source.  There is no need to place the source in your `$GOPATH`.  In fact, we recommend against placing it within `$GOPATH`.
 
 You should also read our [coding guide](https://github.com/influxdata/influxdb/blob/master-1.x/CODING_GUIDELINES.md), to understand better how to write code for InfluxDB.
 
@@ -69,7 +69,7 @@ second to sign our CLA, which can be found
 
 Installing Go
 -------------
-InfluxDB requires Go 1.20.
+InfluxDB requires Go 1.26.
 
 At InfluxDB we find gvm, a Go version manager, useful for installing Go. For instructions
 on how to install it see [the gvm page on github](https://github.com/moovweb/gvm).

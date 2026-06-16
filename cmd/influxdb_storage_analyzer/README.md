@@ -12,8 +12,9 @@ From the InfluxDB repository root:
 PKG_CONFIG=/abs/path/to/pkg-config.sh go build -o influxdb_storage_analyzer ./cmd/influxdb_storage_analyzer
 ```
 
-Some local development environments pin `GOROOT`; when using Go toolchain auto
-download, ensure `PATH` and `GOROOT` point to the same Go version.
+The module baseline is Go 1.26. Some local development environments pin
+`GOROOT`; when using Go toolchain auto download, ensure `PATH` and `GOROOT`
+point to the same Go version.
 
 ## CLI
 

@@ -1,5 +1,5 @@
-FROM golang:1.15.10 as builder
-RUN go get -u github.com/golang/dep/...
+FROM golang:1.26 as builder
+RUN go install github.com/golang/dep/cmd/dep@latest
 WORKDIR /go/src/github.com/influxdata/influxdb
 COPY Gopkg.toml Gopkg.lock ./
 RUN dep ensure -vendor-only
