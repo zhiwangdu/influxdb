@@ -16,7 +16,7 @@ import (
 func (e *Engine) buildFloatCursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) floatCursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return newFloatCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 
@@ -24,7 +24,7 @@ func (e *Engine) buildFloatCursor(ctx context.Context, measurement, seriesKey, f
 func (e *Engine) buildIntegerCursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) integerCursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return newIntegerCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 
@@ -32,7 +32,7 @@ func (e *Engine) buildIntegerCursor(ctx context.Context, measurement, seriesKey,
 func (e *Engine) buildUnsignedCursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) unsignedCursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return newUnsignedCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 
@@ -40,7 +40,7 @@ func (e *Engine) buildUnsignedCursor(ctx context.Context, measurement, seriesKey
 func (e *Engine) buildStringCursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) stringCursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return newStringCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 
@@ -48,6 +48,6 @@ func (e *Engine) buildStringCursor(ctx context.Context, measurement, seriesKey, 
 func (e *Engine) buildBooleanCursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) booleanCursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return newBooleanCursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }

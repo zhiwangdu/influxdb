@@ -88,7 +88,7 @@ func TestAscendingCursorDuplicateDataBug(t *testing.T) {
 	}
 	require.GreaterOrEqualf(tsmAfterCache, 2, "Test precondition failed: Need at least 2 TSM points after cache range to trigger bug, has %d", tsmAfterCache)
 
-	kc := fs.KeyCursor(context.Background(), []byte("measurement,field=value#!~#value"), 0, true)
+	kc := testKeyCursor(context.Background(), fs, []byte("measurement,field=value#!~#value"), 0, true)
 	defer kc.Close()
 
 	cursor := newFloatArrayAscendingCursor()

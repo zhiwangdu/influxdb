@@ -12,7 +12,7 @@ import (
 func (e *Engine) build{{.Name}}Cursor(ctx context.Context, measurement, seriesKey, field string, opt query.IteratorOptions) {{.name}}Cursor {
 	key := SeriesFieldKeyBytes(seriesKey, field)
 	cacheValues := e.Cache.Values(key)
-	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	return new{{.Name}}Cursor(opt.SeekTime(), opt.Ascending, cacheValues, keyCursor)
 }
 

@@ -19,7 +19,7 @@ func (q *arrayCursorIterator) buildFloatArrayCursor(ctx context.Context, name []
 	var err error
 	key := q.seriesFieldKeyBytes(name, tags, field)
 	cacheValues := q.e.Cache.Values(key)
-	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	if opt.Ascending {
 		if q.asc.Float == nil {
 			q.asc.Float = newFloatArrayAscendingCursor()
@@ -46,7 +46,7 @@ func (q *arrayCursorIterator) buildIntegerArrayCursor(ctx context.Context, name 
 	var err error
 	key := q.seriesFieldKeyBytes(name, tags, field)
 	cacheValues := q.e.Cache.Values(key)
-	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	if opt.Ascending {
 		if q.asc.Integer == nil {
 			q.asc.Integer = newIntegerArrayAscendingCursor()
@@ -73,7 +73,7 @@ func (q *arrayCursorIterator) buildUnsignedArrayCursor(ctx context.Context, name
 	var err error
 	key := q.seriesFieldKeyBytes(name, tags, field)
 	cacheValues := q.e.Cache.Values(key)
-	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	if opt.Ascending {
 		if q.asc.Unsigned == nil {
 			q.asc.Unsigned = newUnsignedArrayAscendingCursor()
@@ -100,7 +100,7 @@ func (q *arrayCursorIterator) buildStringArrayCursor(ctx context.Context, name [
 	var err error
 	key := q.seriesFieldKeyBytes(name, tags, field)
 	cacheValues := q.e.Cache.Values(key)
-	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	if opt.Ascending {
 		if q.asc.String == nil {
 			q.asc.String = newStringArrayAscendingCursor()
@@ -127,7 +127,7 @@ func (q *arrayCursorIterator) buildBooleanArrayCursor(ctx context.Context, name 
 	var err error
 	key := q.seriesFieldKeyBytes(name, tags, field)
 	cacheValues := q.e.Cache.Values(key)
-	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.Ascending)
+	keyCursor := q.e.KeyCursor(ctx, key, opt.SeekTime(), opt.StartTime, opt.EndTime, opt.Ascending)
 	if opt.Ascending {
 		if q.asc.Boolean == nil {
 			q.asc.Boolean = newBooleanArrayAscendingCursor()

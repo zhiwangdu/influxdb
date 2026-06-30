@@ -3,6 +3,7 @@ package tsm1_test
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -75,7 +76,7 @@ func TestFileStore_SeekToAsc_FromStart(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
@@ -115,7 +116,7 @@ func TestFileStore_SeekToAsc_Duplicate(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
@@ -188,7 +189,7 @@ func TestFileStore_SeekToAsc_BeforeStart(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -230,7 +231,7 @@ func TestFileStore_SeekToAsc_BeforeStart_OverlapFloat(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -297,7 +298,7 @@ func TestFileStore_SeekToAsc_BeforeStart_OverlapInteger(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.IntegerValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadIntegerBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -363,7 +364,7 @@ func TestFileStore_SeekToAsc_BeforeStart_OverlapUnsigned(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.UnsignedValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadUnsignedBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -429,7 +430,7 @@ func TestFileStore_SeekToAsc_BeforeStart_OverlapBoolean(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.BooleanValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadBooleanBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -495,7 +496,7 @@ func TestFileStore_SeekToAsc_BeforeStart_OverlapString(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.StringValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadStringBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -560,7 +561,7 @@ func TestFileStore_SeekToAsc_OverlapMinFloat(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
@@ -640,7 +641,7 @@ func TestFileStore_SeekToAsc_OverlapMinInteger(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.IntegerValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadIntegerBlock(&buf)
 	if err != nil {
@@ -719,7 +720,7 @@ func TestFileStore_SeekToAsc_OverlapMinUnsigned(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.UnsignedValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadUnsignedBlock(&buf)
 	if err != nil {
@@ -798,7 +799,7 @@ func TestFileStore_SeekToAsc_OverlapMinBoolean(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.BooleanValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadBooleanBlock(&buf)
 	if err != nil {
@@ -877,7 +878,7 @@ func TestFileStore_SeekToAsc_OverlapMinString(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.StringValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	// Search for an entry that exists in the second file
 	values, err := c.ReadStringBlock(&buf)
 	if err != nil {
@@ -955,7 +956,7 @@ func TestFileStore_SeekToAsc_Middle(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 3, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 3, true)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1011,7 +1012,7 @@ func TestFileStore_SeekToAsc_End(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 2, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 2, true)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1050,7 +1051,7 @@ func TestFileStore_SeekToDesc_FromStart(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1089,7 +1090,7 @@ func TestFileStore_SeekToDesc_Duplicate(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 2, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 2, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1148,7 +1149,7 @@ func TestFileStore_SeekToDesc_OverlapMaxFloat(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 5, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 5, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1213,7 +1214,7 @@ func TestFileStore_SeekToDesc_OverlapMaxInteger(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.IntegerValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 5, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 5, false)
 	values, err := c.ReadIntegerBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1275,7 +1276,7 @@ func TestFileStore_SeekToDesc_OverlapMaxUnsigned(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.UnsignedValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 5, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 5, false)
 	values, err := c.ReadUnsignedBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1338,7 +1339,7 @@ func TestFileStore_SeekToDesc_OverlapMaxBoolean(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.BooleanValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 5, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 5, false)
 	values, err := c.ReadBooleanBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1401,7 +1402,7 @@ func TestFileStore_SeekToDesc_OverlapMaxString(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.StringValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 5, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 5, false)
 	values, err := c.ReadStringBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1462,7 +1463,7 @@ func TestFileStore_SeekToDesc_AfterEnd(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 4, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 4, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1501,7 +1502,7 @@ func TestFileStore_SeekToDesc_AfterEnd_OverlapFloat(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 10, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 10, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1598,7 +1599,7 @@ func TestFileStore_SeekToDesc_AfterEnd_OverlapInteger(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.IntegerValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 11, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 11, false)
 	values, err := c.ReadIntegerBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1675,7 +1676,7 @@ func TestFileStore_SeekToDesc_AfterEnd_OverlapUnsigned(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.UnsignedValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 11, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 11, false)
 	values, err := c.ReadUnsignedBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1752,7 +1753,7 @@ func TestFileStore_SeekToDesc_AfterEnd_OverlapBoolean(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.BooleanValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 11, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 11, false)
 	values, err := c.ReadBooleanBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1849,7 +1850,7 @@ func TestFileStore_SeekToDesc_AfterEnd_OverlapString(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.StringValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 11, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 11, false)
 	values, err := c.ReadStringBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -1949,7 +1950,7 @@ func TestFileStore_SeekToDesc_Middle(t *testing.T) {
 
 	// Search for an entry that exists in the second file
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 3, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 3, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2022,7 +2023,7 @@ func TestFileStore_SeekToDesc_End(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 2, false)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 2, false)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2064,7 +2065,7 @@ func TestKeyCursor_TombstoneRange(t *testing.T) {
 	}
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	expValues := []int{0, 2}
 	for _, v := range expValues {
 		values, err := c.ReadFloatBlock(&buf)
@@ -2107,7 +2108,7 @@ func TestKeyCursor_TombstoneRange_PartialFirst(t *testing.T) {
 	fs.Replace(nil, files)
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	expValues := []tsm1.Value{tsm1.NewValue(0, 0.0), tsm1.NewValue(2, 2.0)}
 
 	for _, exp := range expValues {
@@ -2152,7 +2153,7 @@ func TestKeyCursor_TombstoneRange_PartialFloat(t *testing.T) {
 	}
 
 	buf := make([]tsm1.FloatValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadFloatBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2196,7 +2197,7 @@ func TestKeyCursor_TombstoneRange_PartialInteger(t *testing.T) {
 	}
 
 	buf := make([]tsm1.IntegerValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadIntegerBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2240,7 +2241,7 @@ func TestKeyCursor_TombstoneRange_PartialUnsigned(t *testing.T) {
 	}
 
 	buf := make([]tsm1.UnsignedValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadUnsignedBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2284,7 +2285,7 @@ func TestKeyCursor_TombstoneRange_PartialString(t *testing.T) {
 	}
 
 	buf := make([]tsm1.StringValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadStringBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2328,7 +2329,7 @@ func TestKeyCursor_TombstoneRange_PartialBoolean(t *testing.T) {
 	}
 
 	buf := make([]tsm1.BooleanValue, 1000)
-	c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 	values, err := c.ReadBooleanBlock(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error reading values: %v", err)
@@ -2487,7 +2488,7 @@ func TestFileStore_Replace(t *testing.T) {
 	}
 
 	// Should record references to the two existing TSM files
-	cur := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+	cur := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 
 	// Should move the existing files out of the way, but allow query to complete
 	if err := fs.Replace(files[:2], []string{replacement}); err != nil {
@@ -2839,7 +2840,7 @@ func TestFileStore_ReaderBlocking(t *testing.T) {
 		require.NotEmpty(t, snap)
 
 		buf := make([]tsm1.FloatValue, 1000)
-		c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+		c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 		// closeC exists because we want to call c.Close() if a test fails in a defer,
 		// but we also need to call c.Close() as part of the test. closeC makes sure we
 		// don't double close it.
@@ -2901,7 +2902,7 @@ func TestFileStore_ReaderBlocking(t *testing.T) {
 		require.Empty(t, snap)
 
 		buf := make([]tsm1.FloatValue, 1000)
-		c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+		c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 		require.NotNil(t, c)
 		defer c.Close()
 		values, err := c.ReadFloatBlock(&buf)
@@ -3122,6 +3123,13 @@ type keyValues struct {
 	values []tsm1.Value
 }
 
+func keyCursor(ctx context.Context, fs *tsm1.FileStore, key []byte, seek int64, ascending bool) *tsm1.KeyCursor {
+	if ascending {
+		return fs.KeyCursor(ctx, key, seek, seek, math.MaxInt64, ascending)
+	}
+	return fs.KeyCursor(ctx, key, seek, math.MinInt64, seek, ascending)
+}
+
 func MustTempDir() string {
 	dir, err := os.MkdirTemp("", "tsm1-test")
 	if err != nil {
@@ -3194,7 +3202,7 @@ func BenchmarkFileStore_FastLaneContention(b *testing.B) {
 		name string
 		fn   func(fs *tsm1.FileStore)
 	}{
-		{"KeyCursor", func(fs *tsm1.FileStore) { fs.KeyCursor(context.Background(), []byte("cpu"), 0, true).Close() }},
+		{"KeyCursor", func(fs *tsm1.FileStore) { keyCursor(context.Background(), fs, []byte("cpu"), 0, true).Close() }},
 		{"Count", func(fs *tsm1.FileStore) { _ = fs.Count() }},
 		{"Files", func(fs *tsm1.FileStore) { _ = fs.Files() }},
 		{"CurrentGeneration", func(fs *tsm1.FileStore) { _ = fs.CurrentGeneration() }},
@@ -3349,7 +3357,7 @@ func TestFileStore_ConcurrentLocking(t *testing.T) {
 	// FailNow is unsafe.
 	ops := []func(){
 		func() {
-			c := fs.KeyCursor(context.Background(), []byte("cpu"), 0, true)
+			c := keyCursor(context.Background(), fs, []byte("cpu"), 0, true)
 			defer c.Close()
 			var buf []tsm1.FloatValue
 			values, err := c.ReadFloatBlock(&buf)

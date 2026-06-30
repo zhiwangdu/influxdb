@@ -872,8 +872,8 @@ func (f *FileStore) InUse() (bool, error) {
 	return false, nil
 }
 
-// KeyCursor returns a KeyCursor for key and t across the files in the FileStore.
-func (f *FileStore) KeyCursor(ctx context.Context, key []byte, t int64, ascending bool) *KeyCursor {
+// KeyCursor returns a KeyCursor for key and seek across the files in the FileStore.
+func (f *FileStore) KeyCursor(ctx context.Context, key []byte, seek, min, max int64, ascending bool) *KeyCursor {
 	f.fastMu.RLock()
 	defer f.fastMu.RUnlock()
 	if f.newReadersBlocked() {
@@ -888,7 +888,7 @@ func (f *FileStore) KeyCursor(ctx context.Context, key []byte, t int64, ascendin
 			ascending: ascending,
 		}
 	}
-	return newKeyCursor(ctx, f, key, t, ascending)
+	return newKeyCursor(ctx, f, key, seek, min, max, ascending)
 }
 
 // Stats returns the stats of the underlying files, preferring the cached version if it is still valid.
@@ -1167,24 +1167,17 @@ func (f *FileStore) cost(key []byte, min, max int64) query.IteratorCost {
 	return cost
 }
 
-// locations returns the files and index blocks for a key and time.  ascending indicates
+// locations returns the files and index blocks for a key and time range.  ascending indicates
 // whether the key will be scan in ascending time order or descenging time order.
 // This function assumes a read lock (fastMu or slowMu) or both write locks have been taken.
-func (f *FileStore) locations(key []byte, t int64, ascending bool) []*location {
+func (f *FileStore) locations(key []byte, seek, min, max int64, ascending bool) []*location {
 	var cache []IndexEntry
 	locations := make([]*location, 0, len(f.files))
 	for _, fd := range f.files {
-		minTime, maxTime := fd.TimeRange()
-
-		// If we ascending and the max time of the file is before where we want to start
-		// skip it.
-		if ascending && maxTime < t {
-			continue
-			// If we are descending and the min time of the file is after where we want to start,
-			// then skip it.
-		} else if !ascending && minTime > t {
+		if !fd.OverlapsTimeRange(min, max) {
 			continue
 		}
+
 		tombstones := fd.TombstoneRange(key)
 
 		// This file could potential contain points we are looking for so find the blocks for
@@ -1194,21 +1187,15 @@ func (f *FileStore) locations(key []byte, t int64, ascending bool) []*location {
 		for i := 0; i < len(entries); i++ {
 			ie := entries[i]
 
+			if !ie.OverlapsTimeRange(min, max) {
+				continue
+			}
+
 			// Skip any blocks only contain values that are tombstoned.
 			for _, t := range tombstones {
 				if t.Min <= ie.MinTime && t.Max >= ie.MaxTime {
 					continue LOOP
 				}
-			}
-
-			// If we ascending and the max time of a block is before where we are looking, skip
-			// it since the data is out of our range
-			if ascending && ie.MaxTime < t {
-				continue
-				// If we descending and the min time of a block is after where we are looking, skip
-				// it since the data is out of our range
-			} else if !ascending && ie.MinTime > t {
-				continue
 			}
 
 			location := &location{
@@ -1220,11 +1207,11 @@ func (f *FileStore) locations(key []byte, t int64, ascending bool) []*location {
 				// For an ascending cursor, mark everything before the seek time as read
 				// so we can filter it out at query time
 				location.readMin = math.MinInt64
-				location.readMax = t - 1
+				location.readMax = seek - 1
 			} else {
-				// For an ascending cursort, mark everything after the seek time as read
+				// For a descending cursor, mark everything after the seek time as read
 				// so we can filter it out at query time
-				location.readMin = t + 1
+				location.readMin = seek + 1
 				location.readMax = math.MaxInt64
 			}
 			// Otherwise, add this file and block location
@@ -1482,10 +1469,10 @@ func (a ascLocations) Less(i, j int) bool {
 
 // newKeyCursor returns a new instance of KeyCursor.
 // This function assumes a read lock (fastMu or slowMu) or both write locks have been taken.
-func newKeyCursor(ctx context.Context, fs *FileStore, key []byte, t int64, ascending bool) *KeyCursor {
+func newKeyCursor(ctx context.Context, fs *FileStore, key []byte, seek, min, max int64, ascending bool) *KeyCursor {
 	c := &KeyCursor{
 		key:       key,
-		seeks:     fs.locations(key, t, ascending),
+		seeks:     fs.locations(key, seek, min, max, ascending),
 		ctx:       ctx,
 		col:       metrics.GroupFromContext(ctx),
 		ascending: ascending,
@@ -1502,7 +1489,7 @@ func newKeyCursor(ctx context.Context, fs *FileStore, key []byte, t int64, ascen
 		f.r.Ref()
 	}
 
-	c.seek(t)
+	c.seek(seek)
 	return c
 }
 

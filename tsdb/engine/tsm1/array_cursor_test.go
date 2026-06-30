@@ -89,7 +89,7 @@ func TestCursor_ResetFail(t *testing.T) {
 
 		_ = fs.Replace(nil, files)
 
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		// Open a float cursor for an integer block
 		cur := newFloatArrayDescendingCursor()
@@ -105,7 +105,7 @@ func TestDescendingCursor_SinglePointStartTime(t *testing.T) {
 		fs := NewFileStore(dir)
 
 		const START, END = 10, 1
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newIntegerArrayDescendingCursor()
 		// Include a cached value with timestamp equal to END
@@ -141,7 +141,7 @@ func TestDescendingCursor_SinglePointStartTime(t *testing.T) {
 
 		_ = fs.Replace(nil, files)
 
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newIntegerArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -189,7 +189,7 @@ func TestFileStore_DuplicatePoints(t *testing.T) {
 
 	t.Run("ascending", func(t *testing.T) {
 		const START, END = 0, 100
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, true)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, true)
 		defer kc.Close()
 		cur := newFloatArrayAscendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -208,7 +208,7 @@ func TestFileStore_DuplicatePoints(t *testing.T) {
 
 	t.Run("descending", func(t *testing.T) {
 		const START, END = 100, 0
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newFloatArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -283,7 +283,7 @@ func TestFileStore_MergeBlocksLargerThat1000_SecondEntirelyContained(t *testing.
 
 	t.Run("ascending", func(t *testing.T) {
 		const START, END = 1000, 10000
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, true)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, true)
 		defer kc.Close()
 		cur := newFloatArrayAscendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -306,7 +306,7 @@ func TestFileStore_MergeBlocksLargerThat1000_SecondEntirelyContained(t *testing.
 
 	t.Run("descending", func(t *testing.T) {
 		const START, END = 10000, 0
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newFloatArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -386,7 +386,7 @@ func TestFileStore_MergeBlocksLargerThat1000_MultipleBlocksInEachFile(t *testing
 
 	t.Run("ascending", func(t *testing.T) {
 		const START, END = 1000, 1e9
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, true)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, true)
 		defer kc.Close()
 		cur := newFloatArrayAscendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -413,7 +413,7 @@ func TestFileStore_MergeBlocksLargerThat1000_MultipleBlocksInEachFile(t *testing
 
 	t.Run("descending", func(t *testing.T) {
 		const START, END = 1e9, 0
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newFloatArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -480,7 +480,7 @@ func TestFileStore_SeekBoundaries(t *testing.T) {
 
 	t.Run("ascending full", func(t *testing.T) {
 		const START, END = 1000, 1099
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, true)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, true)
 		defer kc.Close()
 		cur := newFloatArrayAscendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -505,7 +505,7 @@ func TestFileStore_SeekBoundaries(t *testing.T) {
 
 	t.Run("ascending split", func(t *testing.T) {
 		const START, END = 1050, 1149
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, true)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, true)
 		defer kc.Close()
 		cur := newFloatArrayAscendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -532,7 +532,7 @@ func TestFileStore_SeekBoundaries(t *testing.T) {
 
 	t.Run("descending full", func(t *testing.T) {
 		const START, END = 1099, 1000
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newFloatArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")
@@ -558,7 +558,7 @@ func TestFileStore_SeekBoundaries(t *testing.T) {
 
 	t.Run("descending split", func(t *testing.T) {
 		const START, END = 1149, 1050
-		kc := fs.KeyCursor(context.Background(), []byte("m,_field=v#!~#v"), START, false)
+		kc := testKeyCursor(context.Background(), fs, []byte("m,_field=v#!~#v"), START, false)
 		defer kc.Close()
 		cur := newFloatArrayDescendingCursor()
 		assert.NoError(t, cur.reset(START, END, nil, kc), "unexpected error resetting cursor")

@@ -338,7 +338,7 @@ func TestFileStore_Array(t *testing.T) {
 			}
 
 			buf := tsdb.NewFloatArrayLen(1000)
-			c := fs.KeyCursor(context.Background(), []byte("cpu"), tc.time, tc.asc)
+			c := keyCursor(context.Background(), fs, []byte("cpu"), tc.time, tc.asc)
 
 			for i, read := range tc.reads {
 				// Search for an entry that exists in the second file

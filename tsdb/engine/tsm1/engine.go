@@ -2806,9 +2806,9 @@ func (e *Engine) cleanupTempTSMFiles() error {
 	return nil
 }
 
-// KeyCursor returns a KeyCursor for the given key starting at time t.
-func (e *Engine) KeyCursor(ctx context.Context, key []byte, t int64, ascending bool) *KeyCursor {
-	return e.FileStore.KeyCursor(ctx, key, t, ascending)
+// KeyCursor returns a KeyCursor for the given key starting at seek.
+func (e *Engine) KeyCursor(ctx context.Context, key []byte, seek, min, max int64, ascending bool) *KeyCursor {
+	return e.FileStore.KeyCursor(ctx, key, seek, min, max, ascending)
 }
 
 // CreateIterator returns an iterator for the measurement based on opt.
