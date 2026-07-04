@@ -3,7 +3,9 @@ package storageflux
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 
 	"github.com/influxdata/flux"
 	"github.com/influxdata/flux/execute"
@@ -123,6 +125,14 @@ type filterIterator struct {
 	stats cursors.CursorStats
 	cache *tagsCache
 	alloc memory.Allocator
+
+	enableSeriesAggregation bool
+}
+
+var SeriesAggregationEnabled = false
+
+func EnableSeriesAggregation(enabled bool) {
+	SeriesAggregationEnabled = enabled
 }
 
 func (fi *filterIterator) Statistics() cursors.CursorStats { return fi.stats }
@@ -156,6 +166,10 @@ func (fi *filterIterator) Do(f func(flux.Table) error) error {
 		return nil
 	}
 
+	fi.enableSeriesAggregation = SeriesAggregationEnabled
+	if fi.enableSeriesAggregation {
+		return fi.handleReadWithAggregation(f, rs)
+	}
 	return fi.handleRead(f, rs)
 }
 
@@ -231,6 +245,279 @@ READ:
 		table = nil
 	}
 	return rs.Err()
+}
+
+func (fi *filterIterator) handleReadWithAggregation(f func(flux.Table) error, rs storage.ResultSet) error {
+	var (
+		cur   cursors.Cursor
+		table storageTable
+	)
+
+	defer func() {
+		if table != nil {
+			table.Close()
+		}
+		if cur != nil {
+			cur.Close()
+		}
+		rs.Close()
+		fi.cache.Release()
+	}()
+
+	buffer := NewSeriesBuffer()
+	for rs.Next() {
+		cur = rs.Cursor()
+		if cur == nil {
+			continue
+		}
+		buffer.Add(rs.Tags(), cur)
+		cur = nil
+	}
+
+	if err := rs.Err(); err != nil {
+		return err
+	}
+
+READ:
+	for _, group := range buffer.GetGroups() {
+		mergedCursor, err := mergeSeriesGroup(group)
+		if err != nil {
+			return err
+		}
+		if mergedCursor == nil {
+			continue
+		}
+		cur = mergedCursor
+		bnds := fi.spec.Bounds
+		key := defaultGroupKeyForSeries(group.tags, bnds)
+		done := make(chan struct{})
+		switch typedCur := cur.(type) {
+		case cursors.IntegerArrayCursor:
+			cols, defs := determineTableColsForSeries(group.tags, flux.TInt)
+			table = newIntegerTable(done, typedCur, bnds, key, cols, group.tags, defs, fi.cache, fi.alloc)
+		case cursors.FloatArrayCursor:
+			cols, defs := determineTableColsForSeries(group.tags, flux.TFloat)
+			table = newFloatTable(done, typedCur, bnds, key, cols, group.tags, defs, fi.cache, fi.alloc)
+		case cursors.UnsignedArrayCursor:
+			cols, defs := determineTableColsForSeries(group.tags, flux.TUInt)
+			table = newUnsignedTable(done, typedCur, bnds, key, cols, group.tags, defs, fi.cache, fi.alloc)
+		case cursors.BooleanArrayCursor:
+			cols, defs := determineTableColsForSeries(group.tags, flux.TBool)
+			table = newBooleanTable(done, typedCur, bnds, key, cols, group.tags, defs, fi.cache, fi.alloc)
+		case cursors.StringArrayCursor:
+			cols, defs := determineTableColsForSeries(group.tags, flux.TString)
+			table = newStringTable(done, typedCur, bnds, key, cols, group.tags, defs, fi.cache, fi.alloc)
+		default:
+			panic(fmt.Sprintf("unreachable: %T", typedCur))
+		}
+
+		cur = nil
+
+		if !table.Empty() {
+			if err := f(table); err != nil {
+				table.Close()
+				table = nil
+				return err
+			}
+			select {
+			case <-done:
+			case <-fi.ctx.Done():
+				table.Cancel()
+				break READ
+			}
+		}
+
+		stats := table.Statistics()
+		fi.stats.ScannedValues += stats.ScannedValues
+		fi.stats.ScannedBytes += stats.ScannedBytes
+		table.Close()
+		table = nil
+	}
+
+	return nil
+}
+
+type SeriesGroup struct {
+	tags       models.Tags
+	cursors    []cursors.Cursor
+	cursorType string
+}
+
+type SeriesBuffer struct {
+	groups map[string]*SeriesGroup
+	mu     sync.RWMutex
+}
+
+func NewSeriesBuffer() *SeriesBuffer {
+	return &SeriesBuffer{groups: make(map[string]*SeriesGroup)}
+}
+
+func (b *SeriesBuffer) Add(tags models.Tags, cursor cursors.Cursor) {
+	cursorType := getCursorType(cursor)
+	if cursorType == "" {
+		cursor.Close()
+		return
+	}
+
+	key := tags.String()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if group, ok := b.groups[key]; ok {
+		if group.cursorType != cursorType {
+			cursor.Close()
+			return
+		}
+		group.cursors = append(group.cursors, cursor)
+		return
+	}
+
+	b.groups[key] = &SeriesGroup{
+		tags:       tags.Clone(),
+		cursors:    []cursors.Cursor{cursor},
+		cursorType: cursorType,
+	}
+}
+
+func (b *SeriesBuffer) GetGroups() []*SeriesGroup {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	keys := make([]string, 0, len(b.groups))
+	for k := range b.groups {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	groups := make([]*SeriesGroup, 0, len(keys))
+	for _, k := range keys {
+		groups = append(groups, b.groups[k])
+	}
+	return groups
+}
+
+func getCursorType(cur cursors.Cursor) string {
+	switch cur.(type) {
+	case cursors.FloatArrayCursor:
+		return "float"
+	case cursors.IntegerArrayCursor:
+		return "integer"
+	case cursors.UnsignedArrayCursor:
+		return "unsigned"
+	case cursors.BooleanArrayCursor:
+		return "boolean"
+	case cursors.StringArrayCursor:
+		return "string"
+	default:
+		return ""
+	}
+}
+
+func mergeSeriesGroup(group *SeriesGroup) (cursors.Cursor, error) {
+	if len(group.cursors) == 0 {
+		return nil, nil
+	}
+
+	switch group.cursorType {
+	case "float":
+		typed := make([]cursors.FloatArrayCursor, 0, len(group.cursors))
+		for _, cur := range group.cursors {
+			floatCur, ok := cur.(cursors.FloatArrayCursor)
+			if !ok {
+				cur.Close()
+				continue
+			}
+			typed = append(typed, floatCur)
+		}
+		if len(typed) == 0 {
+			return nil, nil
+		}
+		return &mergedFloatCursor{cursors: typed}, nil
+	default:
+		first := group.cursors[0]
+		for _, cur := range group.cursors[1:] {
+			cur.Close()
+		}
+		return first, nil
+	}
+}
+
+type mergedFloatCursor struct {
+	cursors []cursors.FloatArrayCursor
+	stats   cursors.CursorStats
+	merged  *cursors.FloatArray
+	emitted bool
+	closed  bool
+	err     error
+}
+
+func (c *mergedFloatCursor) Next() *cursors.FloatArray {
+	if c.emitted {
+		return nil
+	}
+	c.emitted = true
+	if c.merged == nil {
+		c.mergeAll()
+	}
+	return c.merged
+}
+
+func (c *mergedFloatCursor) Close() {
+	if c.closed {
+		return
+	}
+	c.closed = true
+	for _, cur := range c.cursors {
+		cur.Close()
+	}
+}
+
+func (c *mergedFloatCursor) Err() error {
+	if c.err != nil {
+		return c.err
+	}
+	for _, cur := range c.cursors {
+		if err := cur.Err(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *mergedFloatCursor) Stats() cursors.CursorStats {
+	return c.stats
+}
+
+func (c *mergedFloatCursor) mergeAll() {
+	var out *cursors.FloatArray
+	for _, cur := range c.cursors {
+		for a := cur.Next(); a != nil; a = cur.Next() {
+			cloned := cloneFloatArray(a)
+			if out == nil {
+				out = cloned
+				continue
+			}
+			out.Merge(cloned)
+		}
+		c.stats.Add(cur.Stats())
+		if err := cur.Err(); err != nil && c.err == nil {
+			c.err = err
+		}
+	}
+	c.merged = out
+}
+
+func cloneFloatArray(a *cursors.FloatArray) *cursors.FloatArray {
+	if a == nil {
+		return nil
+	}
+	cloned := &cursors.FloatArray{
+		Timestamps: make([]int64, len(a.Timestamps)),
+		Values:     make([]float64, len(a.Values)),
+	}
+	copy(cloned.Timestamps, a.Timestamps)
+	copy(cloned.Values, a.Values)
+	return cloned
 }
 
 type groupIterator struct {
