@@ -20,6 +20,7 @@ type windowAggregateResultSet struct {
 	arrayCursors multiShardCursors
 	cursor       cursors.Cursor
 	err          error
+	pendingRow   *SeriesRow
 }
 
 // IsAscendingWindowAggregate checks two things: If the request passed in
@@ -73,7 +74,7 @@ func (r *windowAggregateResultSet) Next() bool {
 		return false
 	}
 
-	seriesRow := r.seriesCursor.Next()
+	seriesRow := r.nextMergedSeriesRow()
 	if seriesRow == nil {
 		return false
 	}
@@ -142,6 +143,7 @@ func (r *windowAggregateResultSet) Close() {
 		return
 	}
 	r.seriesRow.Query = nil
+	r.pendingRow = nil
 	r.seriesCursor.Close()
 }
 
@@ -157,4 +159,32 @@ func (r *windowAggregateResultSet) Stats() cursors.CursorStats {
 
 func (r *windowAggregateResultSet) Tags() models.Tags {
 	return r.seriesRow.Tags
+}
+
+func (r *windowAggregateResultSet) nextMergedSeriesRow() *SeriesRow {
+	var row *SeriesRow
+	if r.pendingRow != nil {
+		row = r.pendingRow
+		r.pendingRow = nil
+	} else {
+		row = r.seriesCursor.Next()
+	}
+	if row == nil {
+		return nil
+	}
+
+	merged := cloneSeriesRow(row)
+	for {
+		next := r.seriesCursor.Next()
+		if next == nil {
+			break
+		}
+		if !sameSeriesRow(&merged, next) {
+			nextCloned := cloneSeriesRow(next)
+			r.pendingRow = &nextCloned
+			break
+		}
+		merged.Query = append(merged.Query, next.Query...)
+	}
+	return &merged
 }

@@ -16,6 +16,7 @@ type resultSet struct {
 	seriesCursor SeriesCursor
 	seriesRow    SeriesRow
 	arrayCursors multiShardCursors
+	pendingRow   *SeriesRow
 }
 
 // TODO(jsternberg): The range is [start, end) for this function which is consistent
@@ -38,6 +39,7 @@ func (r *resultSet) Close() {
 		return // Nothing to do.
 	}
 	r.seriesRow.Query = nil
+	r.pendingRow = nil
 	r.seriesCursor.Close()
 }
 
@@ -47,7 +49,7 @@ func (r *resultSet) Next() bool {
 		return false
 	}
 
-	seriesRow := r.seriesCursor.Next()
+	seriesRow := r.nextMergedSeriesRow()
 	if seriesRow == nil {
 		return false
 	}
@@ -55,6 +57,34 @@ func (r *resultSet) Next() bool {
 	r.seriesRow = *seriesRow
 
 	return true
+}
+
+func (r *resultSet) nextMergedSeriesRow() *SeriesRow {
+	var row *SeriesRow
+	if r.pendingRow != nil {
+		row = r.pendingRow
+		r.pendingRow = nil
+	} else {
+		row = r.seriesCursor.Next()
+	}
+	if row == nil {
+		return nil
+	}
+
+	merged := cloneSeriesRow(row)
+	for {
+		next := r.seriesCursor.Next()
+		if next == nil {
+			break
+		}
+		if !sameSeriesRow(&merged, next) {
+			nextCloned := cloneSeriesRow(next)
+			r.pendingRow = &nextCloned
+			break
+		}
+		merged.Query = append(merged.Query, next.Query...)
+	}
+	return &merged
 }
 
 func (r *resultSet) Cursor() cursors.Cursor {
