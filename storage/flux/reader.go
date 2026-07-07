@@ -706,8 +706,10 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 
 	// these resources must be closed if not nil on return
 	var (
-		cur   cursors.Cursor
-		table storageTable
+		cur         cursors.Cursor
+		table       storageTable
+		pendingCur  cursors.Cursor
+		pendingTags models.Tags
 	)
 
 	defer func() {
@@ -717,96 +719,259 @@ func (wai *windowAggregateIterator) handleRead(f func(flux.Table) error, rs stor
 		if cur != nil {
 			cur.Close()
 		}
+		if pendingCur != nil {
+			pendingCur.Close()
+		}
 		rs.Close()
 		wai.cache.Release()
 	}()
 
+	loadNextCursor := func() (cursors.Cursor, models.Tags, bool) {
+		if pendingCur != nil {
+			nextCur, nextTags := pendingCur, pendingTags
+			pendingCur, pendingTags = nil, nil
+			return nextCur, nextTags, true
+		}
+
+		for rs.Next() {
+			nextCur := rs.Cursor()
+			if nextCur == nil {
+				// no data for series key + field combination
+				continue
+			}
+			return nextCur, rs.Tags().Clone(), true
+		}
+		return nil, nil, false
+	}
+
+	loadCursorForGroupKey := func(key flux.GroupKey) (cursors.Cursor, bool, error) {
+		nextCur, nextTags, ok := loadNextCursor()
+		if !ok {
+			return nil, false, nil
+		}
+
+		nextKey := defaultGroupKeyForSeries(nextTags, wai.spec.Bounds)
+		if !key.Equal(nextKey) {
+			pendingCur, pendingTags = nextCur, nextTags
+			return nil, false, nil
+		}
+		return nextCur, true, nil
+	}
+
 READ:
-	for rs.Next() {
-		cur = rs.Cursor()
-		if cur == nil {
-			// no data for series key + field combination
-			continue
+	for {
+		var (
+			tags models.Tags
+			ok   bool
+		)
+		cur, tags, ok = loadNextCursor()
+		if !ok {
+			break
 		}
 
 		bnds := wai.spec.Bounds
-		key := defaultGroupKeyForSeries(rs.Tags(), bnds)
+		key := defaultGroupKeyForSeries(tags, bnds)
 		done := make(chan struct{})
 		hasTimeCol := timeColumn != ""
 		switch typedCur := cur.(type) {
 		case cursors.IntegerArrayCursor:
+			var stats cursors.CursorStats
+			arrays, err := readAllIntegerArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
+				nextCur, ok, err := loadCursorForGroupKey(key)
+				if !ok || err != nil {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				nextTypedCur, ok := nextCur.(cursors.IntegerArrayCursor)
+				if !ok {
+					nextCur.Close()
+					return &GroupCursorError{typ: "integer", cursor: nextCur}
+				}
+				nextArrays, err := readAllIntegerArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newIntegerConcatArrayCursor(arrays, stats)
 			if !selector {
 				var fillValue *int64
 				if isAggregateCount(wai.spec.Aggregates[0]) {
 					fillValue = func(v int64) *int64 { return &v }(0)
 				}
-				cols, defs := determineTableColsForWindowAggregate(rs.Tags(), flux.TInt, hasTimeCol)
-				table = newIntegerWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, fillValue, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForWindowAggregate(tags, flux.TInt, hasTimeCol)
+				table = newIntegerWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, fillValue, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else if createEmpty && !hasTimeCol {
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TInt)
-				table = newIntegerEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TInt)
+				table = newIntegerEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else {
 				// Note hasTimeCol == true means that aggregateWindow() was called.
 				// Because aggregateWindow() ultimately removes empty tables we
 				// don't bother creating them here.
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TInt)
-				table = newIntegerWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TInt)
+				table = newIntegerWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.FloatArrayCursor:
+			var stats cursors.CursorStats
+			arrays, err := readAllFloatArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
+				nextCur, ok, err := loadCursorForGroupKey(key)
+				if !ok || err != nil {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				nextTypedCur, ok := nextCur.(cursors.FloatArrayCursor)
+				if !ok {
+					nextCur.Close()
+					return &GroupCursorError{typ: "float", cursor: nextCur}
+				}
+				nextArrays, err := readAllFloatArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newFloatConcatArrayCursor(arrays, stats)
 			if !selector {
-				cols, defs := determineTableColsForWindowAggregate(rs.Tags(), flux.TFloat, hasTimeCol)
-				table = newFloatWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForWindowAggregate(tags, flux.TFloat, hasTimeCol)
+				table = newFloatWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else if createEmpty && !hasTimeCol {
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TFloat)
-				table = newFloatEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TFloat)
+				table = newFloatEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else {
 				// Note hasTimeCol == true means that aggregateWindow() was called.
 				// Because aggregateWindow() ultimately removes empty tables we
 				// don't bother creating them here.
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TFloat)
-				table = newFloatWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TFloat)
+				table = newFloatWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.UnsignedArrayCursor:
+			var stats cursors.CursorStats
+			arrays, err := readAllUnsignedArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
+				nextCur, ok, err := loadCursorForGroupKey(key)
+				if !ok || err != nil {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				nextTypedCur, ok := nextCur.(cursors.UnsignedArrayCursor)
+				if !ok {
+					nextCur.Close()
+					return &GroupCursorError{typ: "unsigned", cursor: nextCur}
+				}
+				nextArrays, err := readAllUnsignedArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newUnsignedConcatArrayCursor(arrays, stats)
 			if !selector {
-				cols, defs := determineTableColsForWindowAggregate(rs.Tags(), flux.TUInt, hasTimeCol)
-				table = newUnsignedWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForWindowAggregate(tags, flux.TUInt, hasTimeCol)
+				table = newUnsignedWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else if createEmpty && !hasTimeCol {
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TUInt)
-				table = newUnsignedEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TUInt)
+				table = newUnsignedEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else {
 				// Note hasTimeCol == true means that aggregateWindow() was called.
 				// Because aggregateWindow() ultimately removes empty tables we
 				// don't bother creating them here.
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TUInt)
-				table = newUnsignedWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TUInt)
+				table = newUnsignedWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.BooleanArrayCursor:
+			var stats cursors.CursorStats
+			arrays, err := readAllBooleanArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
+				nextCur, ok, err := loadCursorForGroupKey(key)
+				if !ok || err != nil {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				nextTypedCur, ok := nextCur.(cursors.BooleanArrayCursor)
+				if !ok {
+					nextCur.Close()
+					return &GroupCursorError{typ: "boolean", cursor: nextCur}
+				}
+				nextArrays, err := readAllBooleanArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newBooleanConcatArrayCursor(arrays, stats)
 			if !selector {
-				cols, defs := determineTableColsForWindowAggregate(rs.Tags(), flux.TBool, hasTimeCol)
-				table = newBooleanWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForWindowAggregate(tags, flux.TBool, hasTimeCol)
+				table = newBooleanWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else if createEmpty && !hasTimeCol {
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TBool)
-				table = newBooleanEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TBool)
+				table = newBooleanEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else {
 				// Note hasTimeCol == true means that aggregateWindow() was called.
 				// Because aggregateWindow() ultimately removes empty tables we
 				// don't bother creating them here.
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TBool)
-				table = newBooleanWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TBool)
+				table = newBooleanWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		case cursors.StringArrayCursor:
+			var stats cursors.CursorStats
+			arrays, err := readAllStringArrays(typedCur, &stats)
+			if err != nil {
+				return err
+			}
+			for {
+				nextCur, ok, err := loadCursorForGroupKey(key)
+				if !ok || err != nil {
+					if err != nil {
+						return err
+					}
+					break
+				}
+				nextTypedCur, ok := nextCur.(cursors.StringArrayCursor)
+				if !ok {
+					nextCur.Close()
+					return &GroupCursorError{typ: "string", cursor: nextCur}
+				}
+				nextArrays, err := readAllStringArrays(nextTypedCur, &stats)
+				if err != nil {
+					return err
+				}
+				arrays = append(arrays, nextArrays...)
+			}
+			typedCur = newStringConcatArrayCursor(arrays, stats)
 			if !selector {
-				cols, defs := determineTableColsForWindowAggregate(rs.Tags(), flux.TString, hasTimeCol)
-				table = newStringWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForWindowAggregate(tags, flux.TString, hasTimeCol)
+				table = newStringWindowTable(done, typedCur, bnds, window, createEmpty, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else if createEmpty && !hasTimeCol {
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TString)
-				table = newStringEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TString)
+				table = newStringEmptyWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			} else {
 				// Note hasTimeCol == true means that aggregateWindow() was called.
 				// Because aggregateWindow() ultimately removes empty tables we
 				// don't bother creating them here.
-				cols, defs := determineTableColsForSeries(rs.Tags(), flux.TString)
-				table = newStringWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, rs.Tags(), defs, wai.cache, wai.alloc)
+				cols, defs := determineTableColsForSeries(tags, flux.TString)
+				table = newStringWindowSelectorTable(done, typedCur, bnds, window, timeColumn, key, cols, tags, defs, wai.cache, wai.alloc)
 			}
 		default:
 			panic(fmt.Sprintf("unreachable: %T", typedCur))
@@ -835,6 +1000,184 @@ READ:
 		table = nil
 	}
 	return rs.Err()
+}
+
+type integerConcatArrayCursor struct {
+	arrays []*cursors.IntegerArray
+	i      int
+	stats  cursors.CursorStats
+}
+
+func newIntegerConcatArrayCursor(arrays []*cursors.IntegerArray, stats cursors.CursorStats) cursors.IntegerArrayCursor {
+	return &integerConcatArrayCursor{arrays: arrays, stats: stats}
+}
+
+func (c *integerConcatArrayCursor) Next() *cursors.IntegerArray {
+	if c.i >= len(c.arrays) {
+		return &cursors.IntegerArray{}
+	}
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *integerConcatArrayCursor) Close()                     {}
+func (c *integerConcatArrayCursor) Err() error                 { return nil }
+func (c *integerConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+type floatConcatArrayCursor struct {
+	arrays []*cursors.FloatArray
+	i      int
+	stats  cursors.CursorStats
+}
+
+func newFloatConcatArrayCursor(arrays []*cursors.FloatArray, stats cursors.CursorStats) cursors.FloatArrayCursor {
+	return &floatConcatArrayCursor{arrays: arrays, stats: stats}
+}
+func (c *floatConcatArrayCursor) Next() *cursors.FloatArray {
+	if c.i >= len(c.arrays) {
+		return &cursors.FloatArray{}
+	}
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *floatConcatArrayCursor) Close()                     {}
+func (c *floatConcatArrayCursor) Err() error                 { return nil }
+func (c *floatConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+type unsignedConcatArrayCursor struct {
+	arrays []*cursors.UnsignedArray
+	i      int
+	stats  cursors.CursorStats
+}
+
+func newUnsignedConcatArrayCursor(arrays []*cursors.UnsignedArray, stats cursors.CursorStats) cursors.UnsignedArrayCursor {
+	return &unsignedConcatArrayCursor{arrays: arrays, stats: stats}
+}
+func (c *unsignedConcatArrayCursor) Next() *cursors.UnsignedArray {
+	if c.i >= len(c.arrays) {
+		return &cursors.UnsignedArray{}
+	}
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *unsignedConcatArrayCursor) Close()                     {}
+func (c *unsignedConcatArrayCursor) Err() error                 { return nil }
+func (c *unsignedConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+type booleanConcatArrayCursor struct {
+	arrays []*cursors.BooleanArray
+	i      int
+	stats  cursors.CursorStats
+}
+
+func newBooleanConcatArrayCursor(arrays []*cursors.BooleanArray, stats cursors.CursorStats) cursors.BooleanArrayCursor {
+	return &booleanConcatArrayCursor{arrays: arrays, stats: stats}
+}
+func (c *booleanConcatArrayCursor) Next() *cursors.BooleanArray {
+	if c.i >= len(c.arrays) {
+		return &cursors.BooleanArray{}
+	}
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *booleanConcatArrayCursor) Close()                     {}
+func (c *booleanConcatArrayCursor) Err() error                 { return nil }
+func (c *booleanConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+type stringConcatArrayCursor struct {
+	arrays []*cursors.StringArray
+	i      int
+	stats  cursors.CursorStats
+}
+
+func newStringConcatArrayCursor(arrays []*cursors.StringArray, stats cursors.CursorStats) cursors.StringArrayCursor {
+	return &stringConcatArrayCursor{arrays: arrays, stats: stats}
+}
+func (c *stringConcatArrayCursor) Next() *cursors.StringArray {
+	if c.i >= len(c.arrays) {
+		return &cursors.StringArray{}
+	}
+	a := c.arrays[c.i]
+	c.i++
+	return a
+}
+func (c *stringConcatArrayCursor) Close()                     {}
+func (c *stringConcatArrayCursor) Err() error                 { return nil }
+func (c *stringConcatArrayCursor) Stats() cursors.CursorStats { return c.stats }
+
+func readAllIntegerArrays(cur cursors.IntegerArrayCursor, stats *cursors.CursorStats) ([]*cursors.IntegerArray, error) {
+	var arrays []*cursors.IntegerArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.IntegerArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]int64(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
+}
+
+func readAllFloatArrays(cur cursors.FloatArrayCursor, stats *cursors.CursorStats) ([]*cursors.FloatArray, error) {
+	var arrays []*cursors.FloatArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.FloatArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]float64(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
+}
+
+func readAllUnsignedArrays(cur cursors.UnsignedArrayCursor, stats *cursors.CursorStats) ([]*cursors.UnsignedArray, error) {
+	var arrays []*cursors.UnsignedArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.UnsignedArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]uint64(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
+}
+
+func readAllBooleanArrays(cur cursors.BooleanArrayCursor, stats *cursors.CursorStats) ([]*cursors.BooleanArray, error) {
+	var arrays []*cursors.BooleanArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		arrays = append(arrays, &cursors.BooleanArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     append([]bool(nil), a.Values...),
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
+}
+
+func readAllStringArrays(cur cursors.StringArrayCursor, stats *cursors.CursorStats) ([]*cursors.StringArray, error) {
+	var arrays []*cursors.StringArray
+	for a := cur.Next(); a != nil && a.Len() > 0; a = cur.Next() {
+		values := make([]string, len(a.Values))
+		copy(values, a.Values)
+		arrays = append(arrays, &cursors.StringArray{
+			Timestamps: append([]int64(nil), a.Timestamps...),
+			Values:     values,
+		})
+	}
+	stats.Add(cur.Stats())
+	err := cur.Err()
+	cur.Close()
+	return arrays, err
 }
 
 func isAggregateCount(kind plan.ProcedureKind) bool {
