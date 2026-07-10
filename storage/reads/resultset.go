@@ -4,11 +4,13 @@ import (
 	"context"
 
 	"github.com/influxdata/influxdb/models"
+	"github.com/influxdata/influxdb/storage/reads/datatypes"
 	"github.com/influxdata/influxdb/tsdb/cursors"
 )
 
 type multiShardCursors interface {
 	createCursor(row SeriesRow) cursors.Cursor
+	createCursorForSelectors(row SeriesRow, agg []*datatypes.Aggregate) (cursors.Cursor, error)
 }
 
 type resultSet struct {

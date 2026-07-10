@@ -118,19 +118,26 @@ func GetWindow(req *datatypes.ReadWindowAggregateRequest) (interval.Window, erro
 
 func (r *windowAggregateResultSet) createCursor(seriesRow SeriesRow) (cursors.Cursor, error) {
 
-	cursor := r.arrayCursors.createCursor(seriesRow)
-
 	window, err := GetWindow(r.req)
 	if err != nil {
 		return nil, err
 	}
 
 	if window.Every().Nanoseconds() == math.MaxInt64 {
-		// This means to aggregate over whole series for the query's time range
-		return newAggregateArrayCursor(r.ctx, r.req.Aggregate, cursor)
-	} else {
-		return NewWindowAggregateArrayCursor(r.ctx, r.req.Aggregate, window, cursor)
+		// This means to aggregate over whole series for the query's time range.
+		// For selector aggregates (first, last, min, max), we need to gather
+		// ALL shard cursors to ensure correct results when a series spans
+		// multiple shards or TSI partitions.
+		aggType := r.req.Aggregate[0].Type
+		if aggType == datatypes.Aggregate_AggregateTypeFirst ||
+			aggType == datatypes.Aggregate_AggregateTypeLast ||
+			aggType == datatypes.Aggregate_AggregateTypeMin ||
+			aggType == datatypes.Aggregate_AggregateTypeMax {
+			return r.arrayCursors.createCursorForSelectors(seriesRow, r.req.Aggregate)
+		}
 	}
+	cursor := r.arrayCursors.createCursor(seriesRow)
+	return NewWindowAggregateArrayCursor(r.ctx, r.req.Aggregate, window, cursor)
 }
 
 func (r *windowAggregateResultSet) Cursor() cursors.Cursor {
