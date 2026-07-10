@@ -60,6 +60,168 @@ func TestTSMReader_Type(t *testing.T) {
 	}
 }
 
+func TestTSMBatchKeyIterator_EstimateMemory(t *testing.T) {
+	dir := mustTempDir()
+	defer os.RemoveAll(dir)
+
+	r1 := writeTSMReaderForBatchIteratorTest(t, dir, "estimate-1.tsm", map[string][][]Value{
+		"cpu": {
+			{NewValue(1, float64(1)), NewValue(2, float64(2))},
+			{NewValue(3, float64(3)), NewValue(4, float64(4))},
+		},
+		"mem": {
+			{NewValue(10, float64(10))},
+		},
+	})
+	defer func() { require.NoError(t, r1.Close()) }()
+
+	r2 := writeTSMReaderForBatchIteratorTest(t, dir, "estimate-2.tsm", map[string][][]Value{
+		"cpu": {
+			{NewValue(5, float64(5)), NewValue(6, float64(6))},
+			{NewValue(7, float64(7)), NewValue(8, float64(8))},
+		},
+		"zzz": {
+			{NewValue(20, float64(20))},
+		},
+	})
+	defer func() { require.NoError(t, r2.Close()) }()
+
+	var expected int64
+	for _, entry := range r1.Entries([]byte("cpu")) {
+		expected += int64(entry.Size)
+	}
+	for _, entry := range r2.Entries([]byte("cpu")) {
+		expected += int64(entry.Size)
+	}
+
+	estimated, err := estimateTSMBatchKeyIteratorMemory([]*TSMReader{r1, r2})
+	require.NoError(t, err)
+	require.Equal(t, expected, estimated)
+
+	streaming, peak, err := shouldStreamTSMBatchKeyIterator([]*TSMReader{r1, r2}, expected-1)
+	require.NoError(t, err)
+	require.True(t, streaming)
+	require.Equal(t, expected, peak)
+}
+
+func TestTSMBatchKeyIterator_StreamingMatchesEager(t *testing.T) {
+	dir := mustTempDir()
+	defer os.RemoveAll(dir)
+
+	r1 := writeTSMReaderForBatchIteratorTest(t, dir, "stream-1.tsm", map[string][][]Value{
+		"cpu": {
+			{NewValue(1, float64(1)), NewValue(3, float64(3))},
+			{NewValue(5, float64(5)), NewValue(7, float64(7))},
+			{NewValue(9, float64(9))},
+		},
+	})
+	r2 := writeTSMReaderForBatchIteratorTest(t, dir, "stream-2.tsm", map[string][][]Value{
+		"cpu": {
+			{NewValue(2, float64(2)), NewValue(4, float64(4))},
+			{NewValue(6, float64(6)), NewValue(8, float64(8))},
+			{NewValue(10, float64(10))},
+		},
+	})
+	r1Path, r2Path := r1.Path(), r2.Path()
+	require.NoError(t, r1.Close())
+	require.NoError(t, r2.Close())
+
+	r1Eager := openTSMReaderForBatchIteratorTest(t, r1Path)
+	r2Eager := openTSMReaderForBatchIteratorTest(t, r2Path)
+	eager, err := newTSMBatchKeyIterator(2, false, 0, make(chan struct{}), []string{r1Path, r2Path}, false, r1Eager, r2Eager)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, eager.Close()) }()
+
+	r1Streaming := openTSMReaderForBatchIteratorTest(t, r1Path)
+	r2Streaming := openTSMReaderForBatchIteratorTest(t, r2Path)
+	streaming, err := newTSMBatchKeyIterator(2, false, 0, make(chan struct{}), []string{r1Path, r2Path}, true, r1Streaming, r2Streaming)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, streaming.Close()) }()
+
+	eagerBlocks := collectTSMBatchIteratorBlocks(t, eager)
+	streamIter := streaming.(*tsmBatchKeyIterator)
+	streamingBlocks := collectTSMBatchIteratorBlocks(t, streaming)
+
+	require.True(t, streamIter.streaming)
+	for _, buf := range streamIter.buf {
+		require.LessOrEqual(t, len(buf), 1)
+	}
+	require.Equal(t, eagerBlocks, streamingBlocks)
+}
+
+type batchIteratorBlock struct {
+	key     string
+	minTime int64
+	maxTime int64
+	block   []byte
+}
+
+func collectTSMBatchIteratorBlocks(t *testing.T, iter KeyIterator) []batchIteratorBlock {
+	t.Helper()
+
+	var blocks []batchIteratorBlock
+	for iter.Next() {
+		if streamIter, ok := iter.(*tsmBatchKeyIterator); ok && streamIter.streaming {
+			for _, buf := range streamIter.buf {
+				require.LessOrEqual(t, len(buf), 1)
+			}
+		}
+
+		key, minTime, maxTime, block, err := iter.Read()
+		require.NoError(t, err)
+		blocks = append(blocks, batchIteratorBlock{
+			key:     string(key),
+			minTime: minTime,
+			maxTime: maxTime,
+			block:   append([]byte(nil), block...),
+		})
+	}
+	require.NoError(t, iter.Err())
+	return blocks
+}
+
+func writeTSMReaderForBatchIteratorTest(t *testing.T, dir, name string, values map[string][][]Value) *TSMReader {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	f, err := os.Create(path)
+	require.NoError(t, err)
+
+	w, err := NewTSMWriter(f)
+	require.NoError(t, err)
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		groups := values[key]
+		for _, group := range groups {
+			require.NoError(t, w.Write([]byte(key), group))
+		}
+	}
+	require.NoError(t, w.WriteIndex())
+	require.NoError(t, w.Close())
+
+	rf, err := os.Open(path)
+	require.NoError(t, err)
+
+	r, err := NewTSMReader(rf)
+	require.NoError(t, err)
+	return r
+}
+
+func openTSMReaderForBatchIteratorTest(t *testing.T, path string) *TSMReader {
+	t.Helper()
+
+	f, err := os.Open(path)
+	require.NoError(t, err)
+
+	r, err := NewTSMReader(f)
+	require.NoError(t, err)
+	return r
+}
+
 func TestTSMReader_MMAP_ReadAll(t *testing.T) {
 	dir := mustTempDir()
 	defer os.RemoveAll(dir)
